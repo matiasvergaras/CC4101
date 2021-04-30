@@ -60,7 +60,7 @@ representation BNF:
   [if0 condition cond-true cond-false]
   [with idvals body]
   [fun args body]
-  [app fname args])
+  [app fid args])
 
 #| <unops> ::= ! | add1 | sub1
 -- lista de operadores que toman un solo valor como parámetro.
@@ -123,47 +123,55 @@ representation BNF:
     ['sub1 sub1]))
 
 
+(define argstest (list 'x 'y '
+                     z))
+
+(define inp '(fun (list x y z)))
+
 #| parse: Src -> Expr
 -- convierte sintaxis concreta en sintaxis abstracta
 |#
 (define (parse src)
   (match src
+    ['() '()] ; caso base para el with
     [(? number?) (num src)]
     [(? symbol?) (id src)]
     [(? boolean?) (bool src)]
-    [(list (? is-binop? op) l r) (binop (parse-binop op) (parse l) (parse r))]
     [(list (? is-unop? op) param) (unop (parse-unop op) (parse param))]
-    [(list 'if condition cond-true cond-false) (if0 (parse condition) (parse true) (parse false))]
-;--- para el caso del with, se itera recursivamente 'hacia adentro',
-;--- y una vez que se tienen todos los with parseados, se parsea el body
-    ['() '()] ; caso base 
-    [( list 'with idvals body )
-     (with (parse (list (car (car idvals)) (cdr(car idvals)) (cdr idvals))) parse(body))]
-    [(list (? symbol? id) val (? pair? rest))
-     (cons (cons id val) parse(list (car(car rest)) (car(cdr rest)) (cdr rest)))]
-    ;[(list 'with named-exprs body)
-     ; (with (parse (list (car(car named-exprs)) (cdr(car named-exprs)) (cdr named-exprs))) (parse body))]
-    ;[(list (? symbol? id) val rest)
-    ; (cons (with id val) (parse rest))]
-;--- parser de funciones
-    ;[(list 'fun (args(listof symbol?))
-;--- parser de aplicaciones con posibilidad de multiples argumentos
-    ;[(list (? symbol? fname) (args) )]
+    [(list (? is-binop? op) l r) (binop (parse-binop op) (parse l) (parse r))]
+    [(list 'if0 condition cond-true cond-false) (if0 (parse condition) (parse cond-true) (parse cond-false))]
+    [(list 'with dict body) (with (parse dict) (parse body))]
+    [(? list? dict) (append (list (cons (car (car dict))
+                                        (parse(car(cdr(car dict))))))
+                            (parse(cdr dict)))]
+    [`(,fid ,args ...) (app fid (map parse args))]
     ))
 
-
 #|
-
 ; interp :: Expr x List[FunDef] x Env -> number?
 ; evalua una expresión aritmética
 (define (interp expr fundefs env)
   (match expr
     [(num n) n]
+
     [(id x) (env-lookup x env)]  ; buscamos el identificador en el env
-    [(add l r) (+ (interp l fundefs env) (interp r fundefs env))]
-    [(sub l r) (- (interp l fundefs env) (interp r fundefs env))]
-    [(with x e b)
+
+    [(bool b) b]
+
+    [(binop op l r)
+     (verify-binop op (interp l fundefs env) (interp r fundefs env))]
+
+    [(unop op arg)
+     (verify-unop op (interp arg fundefs env))]
+
+    [(if0 cond cond-true cond-false)
+     (if (zero? (interp cond fundefs))
+                (interp cond-true fundefs)
+                (interp cond-false fundefs))]
+
+    [(with x dictlist b)
      (interp b fundefs (extend-env x (interp e fundefs env) env))]
+
     [(app f e)
      (def (fundef _ arg body) (lookup-fundef f fundefs))
      (interp body fundefs (extend-env arg (interp e fundefs env)
@@ -174,5 +182,4 @@ representation BNF:
 ; run : Src x List[FunDef]? -> Val
 (define (run prog [fundefs '()])
   (interp (parse prog) fundefs empty-env))
-
 |#
