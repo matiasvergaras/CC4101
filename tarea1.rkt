@@ -62,25 +62,18 @@ representation BNF:
   [fun args body]
   [app fid args])
 
-#| in-list: Any List[any] -> boolean
--- retorna true si el el segundo parámetro está en la
--- lista entregada, false si no.
-|#
-(define (in-list value list)
- (cond
-  [(empty? list) false]
-  [(equal? (first list) value) true]
-  [else (in-list value (rest list))]))
 
 #| <unops> ::= ! | add1 | sub1
 -- lista de operadores que toman un solo valor como parámetro.
 |#
 (define unops (list '! 'add1 'sub1))
+(define not-bool-unops(list 'add1 'sub1))
 
 #| <is-unop?>::= Procedure -> boolean
 -- verifica si un operador dado está en la lista de unops.
 |#
-(define (is-unop? x) (in-list x unops))
+(define (is-unop? x) (member x unops))
+(define (is-not-bool-unop? x) (member x not-bool-unops))
 
 #| <binops> ::= + | - | * | / | && | || / = | < | ...
 -- lista de operadores que toman dos valores como parámetros.
@@ -91,8 +84,8 @@ representation BNF:
 #| <is-binop?>::= Procedure -> boolean
 -- verifica si un operador dado está en la lista de binops.
 |#
-(define (is-binop? x) (in-list x binops))
-(define (is-not-bool-binop? x) (in-list x not-bool-binops))
+(define (is-binop? x) (member x binops))
+(define (is-not-bool-binop? x) (member x not-bool-binops))
 
 #| lookup-fundef: Id List[FunDef] -> FunDef o error
 -- busca la funcion de nombre fname en la lista fundefs y la retorna
@@ -187,7 +180,7 @@ representation BNF:
 (define (interp-unop op param)
   (if (number? param)
       (op param)
-      (if (equal? op not)
+      (if (not (is-not-bool-unop? op))
           (op param)
           (error rtnumberboolean)
           )
