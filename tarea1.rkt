@@ -13,7 +13,7 @@
 -- de la función)
 |#
 (deftype FunDef
-  (fundef fname arg body))
+  (fundef fname args body))
 
 #|-----------------------------
 Environment abstract data type: Env
@@ -62,26 +62,55 @@ representation BNF:
   [fun args body]
   [app fid args])
 
+#| in-list: Any List[any] -> boolean
+-- retorna true si el el segundo parámetro está en la
+-- lista entregada, false si no.
+|#
+(define (in-list value list)
+ (cond
+  [(empty? list) false]
+  [(equal? (first list) value) true]
+  [else (in-list value (rest list))]))
+
 #| <unops> ::= ! | add1 | sub1
 -- lista de operadores que toman un solo valor como parámetro.
 |#
 (define unops (list '! 'add1 'sub1))
 
+#| <boolean-unops> ::= !
+-- lista de operadores booleanos que toman un solo valor como parámetro.
+|#
+(define boolean-unops (list '!))
+
+#| <is-boolean-unop>::= Procedure -> boolean
+-- verifica si un operador dado opera sobre booleanos.
+|#
+(define (is-boolean-unop? x) (in-list x boolean-unops))
+
 #| <is-binop>::= Procedure -> boolean
 -- verifica si un operador dado está en la lista de unops.
 |#
-(define (is-unop? x) (member x unops))
+(define (is-unop? x) (in-list x unops))
 
-#| <binops> ::= + | - | * | / | && | = | < | ...
+#| <binops> ::= + | - | * | / | && | || / = | < | ...
 -- lista de operadores que toman dos valores como parámetros.
 |#
 (define binops (list '+ '- '* '/ '&& '|| '> '< '>= '<=))
 
+#| <boolean-binops> ::= || / &&
+-- lista de operadores que toman dos valores como parámetros.
+|#
+(define parsed-boolean-binops (list '&& '!! '=))
+
 #| <is-binop>::= Procedure -> boolean
 -- verifica si un operador dado está en la lista de binops.
 |#
-(define (is-binop? x) (member x binops))
+(define (is-binop? x) (in-list x binops))
 
+#| <is-boolean-binop>::= Procedure -> boolean
+-- verifica si un operador dado opera sobre booleanos.
+|#
+(define (is-boolean-binop? x) (in-list x boolean-binops))
 
 #| lookup-fundef: Id List[FunDef] -> FunDef o error
 -- busca la funcion de nombre fname en la lista fundefs y la retorna
@@ -94,6 +123,8 @@ representation BNF:
                        fd
                        (lookup-fundef fname fds))]))
 
+
+
 #| parse-binop: symbol -> procedure
 -- realiza el match entre el simbolo de un operador
 -- binario y el operador correspondiente
@@ -104,9 +135,9 @@ representation BNF:
     ['- -]
     ['* *]
     ['/ /]
-    ['(&&) (lambda (x y) (and x y))]
+    ['&& (lambda (x y) (and x y))]
     ['= =]
-    ['(||) (lambda (x y) (or x y))]
+    ['|| (lambda (x y) (or x y))]
     ['> >]
     ['< <]
     ['>= >=]
@@ -122,11 +153,6 @@ representation BNF:
     ['add1 add1]
     ['sub1 sub1]))
 
-
-(define argstest (list 'x 'y '
-                     z))
-
-(define inp '(fun (list x y z)))
 
 #| parse: Src -> Expr
 -- convierte sintaxis concreta en sintaxis abstracta
@@ -148,34 +174,69 @@ representation BNF:
     ))
 
 
-; interp :: Expr x List[FunDef] x Env -> number?
-; evalua una expresión aritmética
+; Error de runtime: booleano por numero
+(define rtnumberboolean "Runtime type error: expected Number found Boolean")
+
+;- expresaremos 'numero o booleano' como number|boolean.
+
+#| interp-binop :: Expr x number|boolean x number|boolean -> number|boolean o error
+-- verifica que los resultados de interpretar los operandos de un
+-- operador binario correspondan a los tipos que dicho
+-- operador puede operar, y en dicho caso, los opera.
+|#
+(define (interp-binop op l r)
+  (if (and (number? l) (number? r))
+      (op l r)
+      (if (and (boolean? l) (boolean? r))
+               (if (equal? op = )
+                   (op l r)
+                   (error rtnumberboolean)
+                   )
+               (error rtnumberboolean)
+               )
+      )
+  )
+
+#| interp-unop :: Expr x number|boolean -> number|boolean o error
+-- verifica que lo resultados de interpretar los operandos de un
+-- operador unario correspondan a los tipos que dicho operador puede operar
+-- y en dicho caso, los opera.
+|#
+(define (interp-unop op param)
+  (if (number? param)
+      (op param)
+      (if (is-boolean-unop? op)
+          (op param)
+          (error rtnumberboolean)
+          )
+      )
+  )
+
+#| interp :: Expr x List[FunDef] x Env -> number?
+-- evalua una expresión aritmética
+|#
 (define (interp expr fundefs env)
   (match expr
     [(num n) n]
-
     [(id x) (env-lookup x env)]  ; buscamos el identificador en el env
-
     [(bool b) b]
-
     [(binop op l r)
-     (verify-binop op (interp l fundefs env) (interp r fundefs env))]
-
+     (interp-binop op (interp l fundefs env) (interp r fundefs env))]
     [(unop op arg)
-     (verify-unop op (interp arg fundefs env))]
-
+     (interp-unop op (interp arg fundefs env))]
     [(if0 cond cond-true cond-false)
      (if (zero? (interp cond fundefs))
                 (interp cond-true fundefs)
                 (interp cond-false fundefs))]
+    ))
 
-    [(with x dictlist b)
-     (interp b fundefs (extend-env x (interp e fundefs env) env))]
+   ; [(with dictlist b)
+   ;  (interp b fundefs (extend-env x (interp e fundefs env) env))]
 
-    [(app f e)
-     (def (fundef _ arg body) (lookup-fundef f fundefs))
-     (interp body fundefs (extend-env arg (interp e fundefs env)
-                                      empty-env))])) ;; queremos scope lexico!
+;    [(app f e)
+ ;    (def (fundef _ arg body) (lookup-fundef f fundefs))
+  ;   (interp body fundefs (extend-env arg (interp e fundefs env)
+   ;                                   empty-env))])) ;; queremos scope lexico!
                                       ; si pasamos "env", tenemos scope dinamico
 
 
