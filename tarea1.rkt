@@ -77,17 +77,7 @@ representation BNF:
 |#
 (define unops (list '! 'add1 'sub1))
 
-#| <boolean-unops> ::= !
--- lista de operadores booleanos que toman un solo valor como parámetro.
-|#
-(define boolean-unops (list '!))
-
-#| <is-boolean-unop>::= Procedure -> boolean
--- verifica si un operador dado opera sobre booleanos.
-|#
-(define (is-boolean-unop? x) (in-list x boolean-unops))
-
-#| <is-binop>::= Procedure -> boolean
+#| <is-unop?>::= Procedure -> boolean
 -- verifica si un operador dado está en la lista de unops.
 |#
 (define (is-unop? x) (in-list x unops))
@@ -95,22 +85,14 @@ representation BNF:
 #| <binops> ::= + | - | * | / | && | || / = | < | ...
 -- lista de operadores que toman dos valores como parámetros.
 |#
-(define binops (list '+ '- '* '/ '&& '|| '> '< '>= '<=))
+(define binops (list '+ '- '* '/ '&& '|| '= '> '< '>= '<=))
+(define not-bool-binops (list '+ '- '* '/ '> '< '>= '<=))
 
-#| <boolean-binops> ::= || / &&
--- lista de operadores que toman dos valores como parámetros.
-|#
-(define parsed-boolean-binops (list '&& '!! '=))
-
-#| <is-binop>::= Procedure -> boolean
+#| <is-binop?>::= Procedure -> boolean
 -- verifica si un operador dado está en la lista de binops.
 |#
 (define (is-binop? x) (in-list x binops))
-
-#| <is-boolean-binop>::= Procedure -> boolean
--- verifica si un operador dado opera sobre booleanos.
-|#
-(define (is-boolean-binop? x) (in-list x boolean-binops))
+(define (is-not-bool-binop? x) (in-list x not-bool-binops))
 
 #| lookup-fundef: Id List[FunDef] -> FunDef o error
 -- busca la funcion de nombre fname en la lista fundefs y la retorna
@@ -124,7 +106,6 @@ representation BNF:
                        (lookup-fundef fname fds))]))
 
 
-
 #| parse-binop: symbol -> procedure
 -- realiza el match entre el simbolo de un operador
 -- binario y el operador correspondiente
@@ -136,12 +117,13 @@ representation BNF:
     ['* *]
     ['/ /]
     ['&& (lambda (x y) (and x y))]
-    ['= =]
+    ['= equal?]
     ['|| (lambda (x y) (or x y))]
     ['> >]
     ['< <]
     ['>= >=]
     ['<= <=]))
+
 
 #| parse-unop: symbol -> procedure
 -- realiza el match entre el simbolo de un operador
@@ -188,7 +170,7 @@ representation BNF:
   (if (and (number? l) (number? r))
       (op l r)
       (if (and (boolean? l) (boolean? r))
-               (if (equal? op = )
+               (if (not (is-not-bool-binop? op))
                    (op l r)
                    (error rtnumberboolean)
                    )
@@ -205,7 +187,7 @@ representation BNF:
 (define (interp-unop op param)
   (if (number? param)
       (op param)
-      (if (is-boolean-unop? op)
+      (if (equal? op not)
           (op param)
           (error rtnumberboolean)
           )
