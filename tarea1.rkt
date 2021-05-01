@@ -203,14 +203,28 @@ representation BNF:
   -- extiende el ambiente dado con los pares (identificador, expr)
   -- de la lista entregada como parametro, interpretando las expr.
   |#
-  (define (extend-env-list dictlist originalEnv)
+  (define (extend-env-list dictlist)
     (cond
-      [(empty? dictlist) originalEnv]
+      [(empty? dictlist) env]
       [ else
         (extend-env (car (first dictlist))
                     (interp (car(cdr (first dictlist))) fundefs env)
-                    (extend-env-list (rest dictlist) env))]))
-   
+                    (extend-env-list (rest dictlist)))]))
+
+  #| app-map-list :: List[id] x List[expr] -> Env
+  -- extiende el ambiente dado con los pares (identificador, expr)
+  -- de la lista entregada como parametro, interpretando las expr.
+  |#
+  (define (app-map-list args es)
+    (cond
+      [(and (empty? args) (not empty? es)) (error "Not enough arguments")]
+      [(and (not empty? args) (empty? es)) (error "Too many arguments")]
+      [(and (empty? args) (empty? es)) empty-env]
+      [else
+        (extend-env ( first args )
+                    ( interp (first es fundefs env) )
+                    (app-map-list (rest args) (rest es)))]))
+  
   (match expr
     [(num n) n]
     [(id x) (env-lookup x env)]  ; buscamos el identificador en el env
@@ -224,13 +238,11 @@ representation BNF:
                 (interp cond-true fundefs)
                 (interp cond-false fundefs))]
     [(with dictlist b)
-     (interp b fundefs (extend-env-list dictlist env))]
-     [(app f e)
+     (interp b fundefs (extend-env-list dictlist))]
+    [(app f es)
      (def (fundef _ args body) (lookup-fundef f fundefs))
-     (interp body fundefs (extend-env arg (interp e fundefs env)
-                                      empty-env))])) ;; queremos scope lexico!
+     (interp body fundefs (app-map-list args es))])) ;; queremos scope lexico!
                                       ; si pasamos "env", tenemos scope dinamico
-    ))
 
 
 ; run : Src x List[FunDef]? -> Val
