@@ -9,35 +9,10 @@
 
 
 #| <fundef> ::= {define {<id> <id>*} <expr>}
--- define una funcion mediante n argumentos y una expresion (cuerpo
--- de la función)
+-- funciones de n argumentos y cuerpo
 |#
 (deftype FunDef
   (fundef fname args body))
-
-#|-----------------------------
-Environment abstract data type: Env
-empty-env  :: Env
-extend-env :: Sym Val Env -> Env
-env-lookup :: Sym Env -> Val (o error)
-
-representation BNF:
-<env> ::= (mtEnv)
-        | (aEnv <id> <val> <env>)
-|#
-(deftype Env
-  (mtEnv)
-  (aEnv id val env))
-
-(define empty-env  (mtEnv))
-(define extend-env aEnv)
-(define (env-lookup x env)
-  (match env
-    [(mtEnv) (error 'env-lookup "free identifier: ~a" x)]
-    [(aEnv id val rest)
-     (if (eq? id x)
-         val
-         (env-lookup x rest))]))
 
 #| <expr> ::= <num>
          | <id> 
@@ -63,17 +38,27 @@ representation BNF:
   [app fid args])
 
 
+#| <in-list>:: Any x List[Any] -> boolean
+-- indica si el valor dado como primer parametro
+-- esta presente en la lista dada como segundo
+|#
+(define (in-list v l)
+  (cond
+    [(equal? l empty) #f]
+    [(equal? (first l) v) #true]
+    [else (in-list v (cdr l))]))
+
 #| <unops> ::= ! | add1 | sub1
 -- lista de operadores que toman un solo valor como parámetro.
 |#
 (define unops (list '! 'add1 'sub1))
 (define not-bool-unops(list 'add1 'sub1))
 
-#| <is-unop?>::= Procedure -> boolean
+#| is-unop? ::= Procedure -> boolean
 -- verifica si un operador dado está en la lista de unops.
 |#
 (define (is-unop? x) (member x unops))
-(define (is-not-bool-unop? x) (member x not-bool-unops))
+(define (is-not-bool-unop? x) (in-list x not-bool-unops))
 
 #| <binops> ::= + | - | * | / | && | || / = | < | ...
 -- lista de operadores que toman dos valores como parámetros.
@@ -81,11 +66,11 @@ representation BNF:
 (define binops (list '+ '- '* '/ '&& '|| '= '> '< '>= '<=))
 (define not-bool-binops (list '+ '- '* '/ '> '< '>= '<=))
 
-#| <is-binop?>::= Procedure -> boolean
+#| is-binop? ::= Procedure -> boolean
 -- verifica si un operador dado está en la lista de binops.
 |#
 (define (is-binop? x) (member x binops))
-(define (is-not-bool-binop? x) (member x not-bool-binops))
+(define (is-not-bool-binop? x) (in-list x not-bool-binops))
 
 #| lookup-fundef: Id List[FunDef] -> FunDef o error
 -- busca la funcion de nombre fname en la lista fundefs y la retorna
@@ -109,12 +94,12 @@ representation BNF:
     ['- -]
     ['* *]
     ['/ /]
-    ['&& (lambda (x y) (and x y))]
     ['= equal?]
+    ['&& (lambda (x y) (and x y))]
     ['|| (lambda (x y) (or x y))]
     ['> >]
-    ['< <]
     ['>= >=]
+    ['< <]
     ['<= <=]))
 
 
@@ -143,54 +128,89 @@ representation BNF:
     [(list 'if0 condition cond-true cond-false)
      (if0 (parse condition) (parse cond-true) (parse cond-false))]
     [(list 'with (? list? dict) body)
-     (with (map (lambda(l) (list(car l) (parse (car(cdr l))))) dict)
+     (with (map (lambda(entry) (list(car entry) (parse (car(cdr entry))))) dict)
            (parse body))]
     [(list (? symbol? fid) (? list? args)) (app fid (map parse args))]
     ))
 
 
+
+#|-----------------------------
+Environment abstract data type: Env
+empty-env  :: Env
+extend-env :: Sym Val Env -> Env
+env-lookup :: Sym Env -> Val (o error)
+
+representation BNF:
+<env> ::= (mtEnv)
+        | (aEnv <id> <val> <env>)
+|#
+(deftype Env
+  (mtEnv)
+  (aEnv id val env))
+
+(define empty-env  (mtEnv))
+(define extend-env aEnv)
+(define (env-lookup x env)
+  (match env
+    [(mtEnv) (error 'env-lookup "free identifier: ~a" x)]
+    [(aEnv id val rest)
+     (if (eq? id x)
+         val
+         (env-lookup x rest))]))
+
 ; Error de runtime: booleano por numero
 (define rtnumberboolean "Runtime type error: expected Number found Boolean")
-
-;- expresaremos 'numero o booleano' como number|boolean.
-
-#| interp-binop :: Expr x number|boolean x number|boolean -> number|boolean o error
--- verifica que los resultados de interpretar los operandos de un
--- operador binario correspondan a los tipos que dicho
--- operador puede operar, y en dicho caso, los opera.
-|#
-(define (interp-binop op l r)
-  (if (and (number? l) (number? r))
-      (op l r)
-      (if (and (boolean? l) (boolean? r))
-               (if (not (is-not-bool-binop? op))
-                   (op l r)
-                   (error rtnumberboolean)
-                   )
-               (error rtnumberboolean)
-               )
-      )
-  )
-
-#| interp-unop :: Expr x number|boolean -> number|boolean o error
--- verifica que lo resultados de interpretar los operandos de un
--- operador unario correspondan a los tipos que dicho operador puede operar
--- y en dicho caso, los opera.
-|#
-(define (interp-unop op param)
-  (if (number? param)
-      (op param)
-      (if (not (is-not-bool-unop? op))
-          (op param)
-          (error rtnumberboolean)
-          )
-      )
-  )
 
 #| interp :: Expr x List[FunDef] x Env -> number?
 -- evalua una expresión aritmética
 |#
 (define (interp expr fundefs env)
+  ;- expresaremos 'numero o booleano' como number|boolean.
+  #| interp-binop :: Expr x number|boolean x number|boolean -> number|boolean o error
+  -- verifica que los resultados de interpretar los operandos de un
+  -- operador binario correspondan a los tipos que dicho
+  -- operador puede operar, y en dicho caso, los opera.
+  |#
+  (define (interp-binop op l r)
+    (if (and (number? l) (number? r))
+        (op l r)
+        (if (and (boolean? l) (boolean? r))
+            (if (not (is-not-bool-binop? op))
+                (op l r)
+                (error rtnumberboolean)
+                )
+            (error rtnumberboolean)
+            )
+        )
+    )
+
+  #| interp-unop :: Expr x number|boolean -> number|boolean o error
+  -- verifica que lo resultados de interpretar los operandos de un
+  -- operador unario correspondan a los tipos que dicho operador puede operar
+  -- y en dicho caso, los opera.
+  |#
+  (define (interp-unop op param)
+    (if (number? param)
+        (op param)
+        (if (not (is-not-bool-unop? op))
+            (op param)
+            (error rtnumberboolean)
+            )
+        )
+    )
+  #| extend-env-list :: List[Pair[symbol, expr]] x Env -> Env
+  -- extiende el ambiente dado con los pares (identificador, expr)
+  -- de la lista entregada como parametro, interpretando las expr.
+  |#
+  (define (extend-env-list dictlist originalEnv)
+    (cond
+      [(empty? dictlist) originalEnv]
+      [ else
+        (extend-env (car (first dictlist))
+                    (interp (car(cdr (first dictlist))) fundefs env)
+                    (extend-env-list (rest dictlist) env))]))
+   
   (match expr
     [(num n) n]
     [(id x) (env-lookup x env)]  ; buscamos el identificador en el env
@@ -203,17 +223,14 @@ representation BNF:
      (if (zero? (interp cond fundefs))
                 (interp cond-true fundefs)
                 (interp cond-false fundefs))]
-    ))
-
-   ; [(with dictlist b)
-   ;  (interp b fundefs (extend-env x (interp e fundefs env) env))]
-
-;    [(app f e)
- ;    (def (fundef _ arg body) (lookup-fundef f fundefs))
-  ;   (interp body fundefs (extend-env arg (interp e fundefs env)
-   ;                                   empty-env))])) ;; queremos scope lexico!
+    [(with dictlist b)
+     (interp b fundefs (extend-env-list dictlist env))]
+     [(app f e)
+     (def (fundef _ args body) (lookup-fundef f fundefs))
+     (interp body fundefs (extend-env arg (interp e fundefs env)
+                                      empty-env))])) ;; queremos scope lexico!
                                       ; si pasamos "env", tenemos scope dinamico
-
+    ))
 
 
 ; run : Src x List[FunDef]? -> Val
