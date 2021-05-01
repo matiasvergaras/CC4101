@@ -137,17 +137,17 @@ representation BNF:
     [(? number?) (num src)]
     [(? symbol?) (id src)]
     [(? boolean?) (bool src)]
-    [(list (? is-binop? op) l r) (binop (parse-binop op) (parse l) (parse r))]
     [(list (? is-unop? op) param) (unop (parse-unop op) (parse param))]
-    [(list 'if0 condition cond-true cond-false)
-     (if0 (parse condition) (parse cond-true) (parse cond-false))]
-    [(list 'with (? list? dict) body)
-     (with (map (lambda(l) (list(car l) (parse (car(cdr l))))) dict)
-           (parse body))]
-    [(list (? symbol? fid) (? list? args)) (app fid (map parse args))]
+    [(list (? is-binop? op) l r) (binop (parse-binop op) (parse l) (parse r))]
+    [(list 'if0 condition cond-true cond-false) (if0 (parse condition) (parse cond-true) (parse cond-false))]
+    [(list 'with dict body) (with (parse dict) (parse body))]
+    [(? list? dict) (append (list (cons (car (car dict))
+                                        (parse(car(cdr(car dict))))))
+                            (parse(cdr dict)))]
+    [`(,fid ,args ...) (app fid (map parse args))]
     ))
 
-
+#|
 ; interp :: Expr x List[FunDef] x Env -> number?
 ; evalua una expresión aritmética
 (define (interp expr fundefs env)
@@ -179,7 +179,7 @@ representation BNF:
                                       ; si pasamos "env", tenemos scope dinamico
 
 
-
 ; run : Src x List[FunDef]? -> Val
 (define (run prog [fundefs '()])
   (interp (parse prog) fundefs empty-env))
+|#
