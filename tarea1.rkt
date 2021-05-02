@@ -8,6 +8,14 @@
 #| ========= PARTE 1: LENGUAJE CON FUNCIONES DE PRIMER ORDEN |#
 
 
+#| <prog> ::= {<fundef>* <expr>}
+-- un programa se compone de 0 o mas deifniciones de funciones y una expresion final
+-- que sirve de punto de entrada.
+|#
+(deftype Prog
+  (prog fundefs main))
+
+  
 #| <fundef> ::= {define {<id> <id>*} <expr>}
 -- funciones de n argumentos y cuerpo
 |#
@@ -125,18 +133,27 @@
     [(? boolean?) (bool src)]
     [(list (? is-binop? op) l r) (binop (parse-binop op) (parse l) (parse r))]
     [(list (? is-unop? op) param) (unop (parse-unop op) (parse param))]
-    [(list 'if0 condition cond-true cond-false)
+    [(list 'if condition cond-true cond-false)
      (if0 (parse condition) (parse cond-true) (parse cond-false))]
     [(list 'with (? list? dict) body)
      (with (map (lambda(entry) (list(car entry) (parse (car(cdr entry))))) dict)
            (parse body))]
-    [(list (? symbol? fid) (? list? args)) (app fid (map parse args))]
-    [(list 'define (? symbol? fname) args body)
-          ()]
+    [(list 'define (? list? fname-args) body)
+          ( fundef (first fname-args)
+                   (map (lambda (entry) (parse entry)) (rest fname-args))
+                   (parse body))]
+    [(? list? args) 
+     (cond
+       [(symbol? (car args))(app (first args) (map parse (rest args)))] ; app
+       [else (list (map (lambda (entry) ;prog
+                  (cond
+                    [(equal? (first entry) 'define) (parse entry)]
+                        [else '()])) args)
+           (parse (car (reverse args))))])]
     ))
 
-
-
+(define a '{f {f 10 2}})
+(listof 1)
 #|-----------------------------
 Environment abstract data type: Env
 empty-env  :: Env
@@ -164,8 +181,8 @@ representation BNF:
 ; Error de runtime: booleano por numero
 (define rtnumberboolean "Runtime type error: expected Number found Boolean")
 
-#| interp :: Expr x List[FunDef] x Env -> number?
--- evalua una expresión aritmética
+#| interp :: Expr x List[FunDef] x Env -> number|boolean o error
+-- evalua expresiones aritméticas y booleanas
 |#
 (define (interp expr fundefs env)
   ;- expresaremos 'numero o booleano' como number|boolean.
@@ -243,8 +260,11 @@ representation BNF:
      (interp b fundefs (extend-env-list dictlist))]
     [(app f es)
      (def (fundef _ args body) (lookup-fundef f fundefs))
-     (interp body fundefs (app-map-list args es))])) ;; queremos scope lexico!
-                                      ; si pasamos "env", tenemos scope dinamico
+     (interp body fundefs (app-map-list args es))] ;; queremos scope lexico!
+    [(list aprog)
+     (interp (car (rest aprog)) (car aprog)  empty-env)]
+    ))
+
 
 
 ; run : Src x List[FunDef]? -> Val
