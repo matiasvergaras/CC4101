@@ -42,8 +42,8 @@
   [binop op l r]
   [if0 condition cond-true cond-false]
   [with idvals body]
-  [fun args body]
-  [app fid args])
+  [app fid args]
+  )       
 
 
 #| <in-list>:: Any x List[Any] -> boolean
@@ -121,6 +121,35 @@
     ['add1 add1]
     ['sub1 sub1]))
 
+#| parse-prog: Src -> Prog
+-- genera un programa a partir del parseo del src.
+-- Primero parsea las funciones, luego llama al parser habitual
+-- para generar una expr con el candidato a main.
+|#
+(define (parse-prog src)
+  (match src
+        [(list 'define (? list? fname-args) body)
+          ( fundef (first fname-args)
+                   (map (lambda (entry) (parse entry)) (rest fname-args))
+                   (parse body))]
+    [(list aprog)
+     (prog (map (lambda (entry) ;prog
+                  (cond
+                    [(equal? (first entry) 'define) (parse-prog entry)]
+                       )) aprog)
+           (parse (car (reverse aprog))))]
+    ))
+
+#| interp-prog: Prog -> number|boolean|error
+-- interpreta un programa, recuperando las definiciones de funciones
+-- y el main, para entregarlos como argumentos al interprete de
+-- expresiones (expr).
+|#
+(define (interp-prog aprog)
+  
+  )
+
+|#
 
 #| parse: Src -> Expr
 -- convierte sintaxis concreta en sintaxis abstracta
@@ -138,22 +167,11 @@
     [(list 'with (? list? dict) body)
      (with (map (lambda(entry) (list(car entry) (parse (car(cdr entry))))) dict)
            (parse body))]
-    [(list 'define (? list? fname-args) body)
-          ( fundef (first fname-args)
-                   (map (lambda (entry) (parse entry)) (rest fname-args))
-                   (parse body))]
+
     [(? list? args) 
-     (cond
-       [(symbol? (car args))(app (first args) (map parse (rest args)))] ; app
-       [else (list (map (lambda (entry) ;prog
-                  (cond
-                    [(equal? (first entry) 'define) (parse entry)]
-                        [else '()])) args)
-           (parse (car (reverse args))))])]
+     (app (first args) (map parse (rest args)))] ;app
     ))
 
-(define a '{f {f 10 2}})
-(listof 1)
 #|-----------------------------
 Environment abstract data type: Env
 empty-env  :: Env
@@ -261,8 +279,6 @@ representation BNF:
     [(app f es)
      (def (fundef _ args body) (lookup-fundef f fundefs))
      (interp body fundefs (app-map-list args es))] ;; queremos scope lexico!
-    [(list aprog)
-     (interp (car (rest aprog)) (car aprog)  empty-env)]
     ))
 
 
