@@ -131,6 +131,8 @@
      (with (map (lambda(entry) (list(car entry) (parse (car(cdr entry))))) dict)
            (parse body))]
     [(list (? symbol? fid) (? list? args)) (app fid (map parse args))]
+    [(list 'define (? symbol? fname) args body)
+          ()]
     ))
 
 
