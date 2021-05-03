@@ -87,6 +87,7 @@
 (define (lookup-fundef fname fundefs)
   (match fundefs
     ['() (error "undefined function:" fname)]
+    [(list empty) (error "undefined function:" fname)]
     [(cons fd fds) (if (eq? (fundef-fname fd) fname)
                        fd
                        (lookup-fundef fname fds))]))
@@ -121,6 +122,7 @@
     ['add1 add1]
     ['sub1 sub1]))
 
+
 #| parse-prog: Src -> Prog
 -- genera un programa a partir del parseo del src.
 -- Primero parsea las funciones, luego llama al parser habitual
@@ -128,15 +130,15 @@
 |#
 (define (parse-prog src)
   (match src
-        [(list 'define (? list? fname-args) body)
-          ( fundef (first fname-args)
-                   (map (lambda (entry) (parse entry)) (rest fname-args))
-                   (parse body))]
+    [(list 'define (? list? fname-args) body)
+     ( fundef (first fname-args)
+              (map (lambda (entry) (parse entry)) (rest fname-args))
+              (parse body))]
     [(list aprog)
      (prog (map (lambda (entry) ;prog
                   (cond
                     [(equal? (first entry) 'define) (parse-prog entry)]
-                       )) aprog)
+                    [else empty ])) aprog)
            (parse (car (reverse aprog))))]
     ))
 
@@ -145,11 +147,9 @@
 -- y el main, para entregarlos como argumentos al interprete de
 -- expresiones (expr).
 |#
-(define (interp-prog aprog)
-  
-  )
+(define (interp-prog program fundefs env)
+  (interp (prog-main program) (append (prog-fundefs program) fundefs) empty-env))
 
-|#
 
 #| parse: Src -> Expr
 -- convierte sintaxis concreta en sintaxis abstracta
@@ -160,8 +160,10 @@
     [(? number?) (num src)]
     [(? symbol?) (id src)]
     [(? boolean?) (bool src)]
-    [(list (? is-binop? op) l r) (binop (parse-binop op) (parse l) (parse r))]
-    [(list (? is-unop? op) param) (unop (parse-unop op) (parse param))]
+    [(list (? is-binop? op) l r)
+     (binop (parse-binop op) (parse l) (parse r))]
+    [(list (? is-unop? op) param)
+     (unop (parse-unop op) (parse param))]
     [(list 'if condition cond-true cond-false)
      (if0 (parse condition) (parse cond-true) (parse cond-false))]
     [(list 'with (? list? dict) body)
@@ -188,11 +190,16 @@ representation BNF:
 
 (define empty-env  (mtEnv))
 (define extend-env aEnv)
+
 (define (env-lookup x env)
+  (display x)
+    (display (parse x))
+  (displayln env)
+
   (match env
     [(mtEnv) (error 'env-lookup "free identifier: ~a" x)]
     [(aEnv id val rest)
-     (if (eq? id x)
+     (if (or (eq? id x) (eq? id (parse x)))
          val
          (env-lookup x rest))]))
 
@@ -254,12 +261,12 @@ representation BNF:
   |#
   (define (app-map-list args es)
     (cond
-      [(and (empty? args) (not empty? es)) (error "Not enough arguments")]
-      [(and (not empty? args) (empty? es)) (error "Too many arguments")]
+      [(and (empty? args) (not (empty? es))) (error "Not enough arguments")]
+      [(and (not (empty? args)) (empty? es)) (error "Too many arguments")]
       [(and (empty? args) (empty? es)) empty-env]
       [else
         (extend-env ( first args )
-                    ( interp (first es fundefs env) )
+                    ( interp (first es) fundefs env )
                     (app-map-list (rest args) (rest es)))]))
   
   (match expr
@@ -270,10 +277,10 @@ representation BNF:
      (interp-binop op (interp l fundefs env) (interp r fundefs env))]
     [(unop op arg)
      (interp-unop op (interp arg fundefs env))]
-    [(if0 cond cond-true cond-false)
-     (if (zero? (interp cond fundefs))
-                (interp cond-true fundefs)
-                (interp cond-false fundefs))]
+    [(if0 condition cond-true cond-false)
+     (if (zero? (interp condition fundefs env))
+                (interp cond-true fundefs env)
+                (interp cond-false fundefs env))]
     [(with dictlist b)
      (interp b fundefs (extend-env-list dictlist))]
     [(app f es)
@@ -285,4 +292,4 @@ representation BNF:
 
 ; run : Src x List[FunDef]? -> Val
 (define (run prog [fundefs '()])
-  (interp (parse prog) fundefs empty-env))
+  (interp-prog (parse-prog prog) fundefs empty-env))
