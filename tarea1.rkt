@@ -34,7 +34,9 @@
 -- representa el tipo de una expresión, argumento o función.
 |#
 (deftype Type
-  (type t))
+  [Num n]
+  [Bool b]
+  [Any a])
 
 #| <expr> ::= <num>
          | <id> 
@@ -74,25 +76,68 @@
 -- lista de operadores que toman un solo valor como parámetro.
 |#
 (define unops (list '! 'add1 'sub1))
+
+#| <not-bool-unops>::= add1 | sub1
+-- operadores que toman un solo valor y este no es booleano
+|#
 (define not-bool-unops(list 'add1 'sub1))
 
 #| is-unop? ::= Procedure -> boolean
 -- verifica si un operador dado está en la lista de unops.
 |#
 (define (is-unop? x) (member x unops))
+
+#| <is-not-bool-unops>::= Procedure -> boolean
+-- verifica si un operador dado no está en la lista de not-bool-unops.
+|#
 (define (is-not-bool-unop? x) (in-list x not-bool-unops))
 
 #| <binops> ::= + | - | * | / | && | || / = | < | ...
 -- lista de operadores que toman dos valores como parámetros.
 |#
 (define binops (list '+ '- '* '/ '&& '|| '= '> '< '>= '<=))
-(define not-bool-binops (list '+ '- '* '/ '> '< '>= '<=))
+
+#| <not-bool-binops> ::= + | - | * | / | > | < | >= | <=
+-- operadores que toman dos valores y estos no pueden ser booleanos.
+-- P2: se agrega = por enunciado.
+|#
+(define not-bool-binops (list '+ '- '* '/ '> '< '= '>= '<=))
 
 #| is-binop? ::= Procedure -> boolean
 -- verifica si un operador dado está en la lista de binops.
 |#
 (define (is-binop? x) (member x binops))
+
+#| is-not-bool-binop? ::= Procedure -> boolean
+-- verifica si un operador dado no está en la lista de boolean-binops.
+|#
 (define (is-not-bool-binop? x) (in-list x not-bool-binops))
+
+
+#| < b-to-b-op> ::= !
+-- lista con los operadores que van de Bool a Bool
+|#
+(define b-to-b-op (list '!))
+
+#| < n-to-b-op> ::= !
+-- lista con los operadores que van de Number a Bool
+|#
+(define n-to-b-op (list '!))
+
+#| < n-to-n-op> ::= !
+-- lista con los operadores que van de Number a Number
+|#
+(define n-to-n-op (list 'add1 'sub1))
+
+#| < n-n-to-n-op> ::= !
+-- lista con los operadores que van de Number x Number a Number
+|#
+(define n-n-to-n-op (list '+ '- '* '/))
+
+#| < n-n-to-b-op> ::= !
+-- lista con los operadores que van de Number x Number a Bool
+|#
+(define n-n-to-b-op (list '= '>= '<= '> '<))
 
 #| lookup-fundef: Id List[FunDef] -> FunDef o error
 -- busca la funcion de nombre fname en la lista fundefs y la retorna
@@ -141,10 +186,8 @@
 -- genera una funcion (en sintaxis abstracta) a partir del parseo del src.
 |#
 (define (parse-fun src)
-  (display "xao")
   (match src
     [(list 'define (? list? fname-args) body)
-     (display "hola")
      ( fundef (first fname-args)
               (map (lambda (entry) (parse entry)) (rest fname-args))
               (parse body))]
@@ -311,6 +354,43 @@ representation BNF:
 
 
 
+   
+
+#| has-type :: Expr -> boolean
+-- revisa que la expresion dada como parametro no sea de tipo Any.
+|#
+(define (has-type aexpr)
+  (match expr
+    [(list with (? list? dictlist) body)
+     (if typecheck 
+     ]
+    [(list app fid  (? list? args))
+     (...)
+     ]
+ ))
+
+#| 
+
+#| checktype-prog :: Prog -> boolean
+-- revisa que un programa, dado como argumento, esté
+-- correctamente tipado:
+-- un programa está correctamente tipado si todas sus definiciones
+-- de funcion estan bien tipadas y su main tiene un tipo (no importa cual).
+|#
+(define (checktype-prog aprog)
+  (if (and (has-type prog-main)(checktype prog-fundefs)) #t #f))
+
+
 ; run : Src x List[FunDef]? -> Val
 (define (run prog [fundefs '()])
   (interp-prog (parse-prog prog) fundefs empty-env))
+
+
+
+(test (run '{
+           { ;; Programa de Ejemplo 3
+   {define {triple x} {* 3 x}}
+   {define {add2 x} {+ 2 x}}
+   {add2 {triple 2}}
+}
+           }) 8)
