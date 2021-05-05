@@ -16,11 +16,25 @@
   (prog fundefs main))
 
   
-#| <fundef> ::= {define {<id> <id>*} <expr>}
--- funciones de n argumentos y cuerpo
+#| <fundef> ::= {define {<id> <arg>*}[: <type>] <expr>}
+-- funciones de n argumentos y cuerpo, con declaracion
+-- opcional de tipos.
 |#
 (deftype FunDef
   (fundef fname args body))
+
+#| <arg> ::= <id> | {<id> : <type>}
+-- representa un argumento de funcion:
+-- un identificador y un tipo opcional.
+|#
+(deftype Arg
+  (arg id type))
+
+#| <type>:: = Num | Bool | Any
+-- representa el tipo de una expresión, argumento o función.
+|#
+(deftype Type
+  (type t))
 
 #| <expr> ::= <num>
          | <id> 
@@ -123,21 +137,32 @@
     ['sub1 sub1]))
 
 
+#| parse-fun: Src -> Fundef
+-- genera una funcion (en sintaxis abstracta) a partir del parseo del src.
+|#
+(define (parse-fun src)
+  (display "xao")
+  (match src
+    [(list 'define (? list? fname-args) body)
+     (display "hola")
+     ( fundef (first fname-args)
+              (map (lambda (entry) (parse entry)) (rest fname-args))
+              (parse body))]
+    ))
+
+
+
 #| parse-prog: Src -> Prog
--- genera un programa a partir del parseo del src.
+-- genera un programa (sintaxis abstracta) a partir del parseo del src.
 -- Primero parsea las funciones, luego llama al parser habitual
 -- para generar una expr con el candidato a main.
 |#
 (define (parse-prog src)
   (match src
-    [(list 'define (? list? fname-args) body)
-     ( fundef (first fname-args)
-              (map (lambda (entry) (parse entry)) (rest fname-args))
-              (parse body))]
     [(list aprog)
-     (prog (map (lambda (entry) ;prog
+     (prog (map (lambda (entry) 
                   (cond
-                    [(equal? (first entry) 'define) (parse-prog entry)]
+                    [(equal? (first entry) 'define) (parse-fun entry)]
                     [else empty ])) aprog)
            (parse (car (reverse aprog))))]
     ))
@@ -192,14 +217,10 @@ representation BNF:
 (define extend-env aEnv)
 
 (define (env-lookup x env)
-  (display x)
-    (display (parse x))
-  (displayln env)
-
   (match env
     [(mtEnv) (error 'env-lookup "free identifier: ~a" x)]
     [(aEnv id val rest)
-     (if (or (eq? id x) (eq? id (parse x)))
+     (if (or (equal? id x) (equal? id (parse x)))
          val
          (env-lookup x rest))]))
 
