@@ -34,8 +34,25 @@
 -- representa el tipo de una expresión, argumento o función.
 |#
 (deftype Type
-  (type t))
+  [Bool]
+  [Num]
+  [Any])
 
+#| typechecker: Prog -> Type | error
+-- recibe un programa y retorna su tipo
+-- o error si es que corresponde 
+|#
+(define (typechecker aprog)
+  (match aprog
+    [(num x)
+     Num]
+    [(list binop + _ _)
+     (Type Num)]
+    [(list binop - _ _)
+     (Type Num)]
+    ))
+  
+  
 #| <expr> ::= <num>
          | <id> 
          | <bool>
@@ -58,7 +75,6 @@
   [with idvals body]
   [app fid args]
   )       
-
 
 #| <in-list>:: Any x List[Any] -> boolean
 -- indica si el valor dado como primer parametro
@@ -101,11 +117,9 @@
 (define (lookup-fundef fname fundefs)
   (match fundefs
     ['() (error "undefined function:" fname)]
-    [(list empty) (error "undefined function:" fname)]
     [(cons fd fds) (if (eq? (fundef-fname fd) fname)
                        fd
                        (lookup-fundef fname fds))]))
-
 
 #| parse-binop: symbol -> procedure
 -- realiza el match entre el simbolo de un operador
@@ -156,12 +170,11 @@
 -- para generar una expr con el candidato a main.
 |#
 (define (parse-prog src)
-     (prog (map (lambda (entry) 
-                  (cond
-                    [(equal? (first entry) 'define) (parse-fun entry)]
-                    [else empty ])) src)
-           (parse (car (reverse src))))
-    )
+  (match src
+     [(list body)
+       (prog empty (parse body))]
+     [(list fundefs ... main)
+      (prog (map (lambda (entry) (parse-fun entry)) fundefs) (parse main))]))
 
 #| interp-prog: Prog -> number|boolean|error
 -- interpreta un programa, recuperando las definiciones de funciones
