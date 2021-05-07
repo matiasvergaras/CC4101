@@ -7,6 +7,12 @@
 
 #| ========= PARTE 1: LENGUAJE CON FUNCIONES DE PRIMER ORDEN |#
 
+#|
+-- Definimos los errores como constantes para evitar escribirlos varias veces.
+|#
+; Error de runtime: booleano por numero
+(define rtnumberboolean "Runtime type error: expected Number found Boolean")
+
 
 #| <prog> ::= {<fundef>* <expr>}
 -- un programa se compone de 0 o mas deifniciones de funciones y una expresion final
@@ -34,23 +40,127 @@
 -- representa el tipo de una expresión, argumento o función.
 |#
 (deftype Type
-  [Bool]
   [Num]
+  [Bool]
   [Any])
 
-#| typechecker: Prog -> Type | error
+#| parse-type: symbol -> Type
+-- realiza el match entre la síntaxis abstracta de un tipo ('Num, 'Bool, 'Any)
+-- y el tipo Type correspondiente.
+|#
+(define (parse-type src)
+  (match src
+    ['Num Num]
+    ['Bool Bool]
+    ['Any Any]
+    [_ Any]
+    ))
+
+#| dsp-type: Type -> symbol
+-- realiza el match inverso al de parse-type: de Type a sintaxis concreta
+|#
+(define (dsp-type src)
+  (cond
+    [(equal? Num src) 'Num]
+    [(equal? Bool src) 'Bool]
+    [else 'Any]))
+
+(define (binop-num-procs) (list + - = / * >= <= > <))  
+
+#| typecheck-unop: unop expr -> Type | error
+-- recibe un operador unario y una expresion
+-- y retorna el tipo del resultado de aplicar
+-- el operador sobre la expresion,o error si cor
+|#
+(define (typecheck-unop op p)
+  (let([tp (typecheck-expr p)])
+  (cond
+    [(equal? op not) (if (equal? tp Bool) Bool (error "Expected Bool, found Num"))]
+    [(equal? op add1) (if (equal? tp Num) Num (error "Expected Num, found Bool"))]
+    [(equal? op sub1) (if (equal? tp Num) Num (error "Expected Num, found Bool"))]
+    )))
+
+
+#| typecheck-binop: binop expr expr -> Type | error
+-- recibe un operador binario y dos expresiones
+-- y retorna el tipo del resultado de aplicar
+-- el operador sobre las expresiones, o error si cor
+|#
+(define (typecheck-binop op l r)
+  (let([tl (typecheck-expr l)])
+  (let([tr (typecheck-expr r)])
+  (cond
+    [(equal? op equal?) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
+    [(equal? op +) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
+    [(equal? op -) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
+    [(equal? op /) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
+    [(equal? op *) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
+    [(equal? op =) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
+    [(equal? op >) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
+    [(equal? op <) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
+    [(equal? op <=) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
+    [(equal? op >=) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
+    [else Bool] ; and y or devuelven siempre un booleano, independiente
+    ))))        ; de si reciben nums, bools, o una mezcla de ambos.
+
+#| typecheck-expr: expr -> Type | error
+-- recibe una expresion y retorna su tipo
+-- o error si es que corresponde 
+|#
+(define (typecheck-expr expr)
+  (match expr
+    [(num n) Num]
+    [(bool b) Bool]
+    [(unop op p)
+     (typecheck-unop op p)]
+    [(binop op l r)
+     (typecheck-binop op l r)]
+    [(if0 condition cond-true cond-false)(display "mañana sigo :D")]
+   ))
+
+
+
+
+
+#| typecheck-fun: Fundef -> Type | error
+-- recibe una función y retorna su tipo
+-- o error si es que corresponde 
+|#
+(define (typecheck-fun afun)
+  (display afun)
+  )
+
+
+#| typecheck-prog: Prog -> Type | error
 -- recibe un programa y retorna su tipo
 -- o error si es que corresponde 
 |#
-(define (typechecker aprog)
+(define (typecheck-prog aprog)
   (match aprog
-    [(num x)
-     Num]
-    [(list binop + _ _)
-     (Type Num)]
-    [(list binop - _ _)
-     (Type Num)]
+    [(prog '() main)
+     (displayln "program without functions")
+     (typecheck-expr main)
+     ]
+    [(prog fundefs main)
+     (if (map typecheck-fun fundefs)
+           (if (typecheck-expr main)
+               (typecheck-expr main)
+               (error "There is a static error in main, but typechecker was not able to
+                       detect it :("))
+           (error "There is a static error in fundefs, but typechecker was not able to
+                   detect it :("))]
     ))
+
+#| typecheck: expr -> Type | error
+-- recibe la sintaxis concreta de un programa y retorna
+-- la sintaxis concreta correspondiente al tipo del mismo,
+-- o error si es que corresponde 
+|#
+(define (typecheck src)
+  (dsp-type(typecheck-prog (parse-prog src)))
+  )
+
+
   
   
 #| <expr> ::= <num>
@@ -76,38 +186,56 @@
   [app fid args]
   )       
 
-#| <in-list>:: Any x List[Any] -> boolean
+#| <in-list>:: a x List[any] -> boolean
 -- indica si el valor dado como primer parametro
 -- esta presente en la lista dada como segundo
 |#
 (define (in-list v l)
   (cond
     [(equal? l empty) #f]
-    [(equal? (first l) v) #true]
+    [(equal? (first l) v) #t]
     [else (in-list v (cdr l))]))
 
 #| <unops> ::= ! | add1 | sub1
 -- lista de operadores que toman un solo valor como parámetro.
 |#
 (define unops (list '! 'add1 'sub1))
+
+#| not-bool-unop? ::= add1 | sub1
+-- operadores unarios que no son booleanos
+|#
 (define not-bool-unops(list 'add1 'sub1))
 
 #| is-unop? ::= Procedure -> boolean
 -- verifica si un operador dado está en la lista de unops.
 |#
 (define (is-unop? x) (member x unops))
+
+#| is-not-bool-unop? ::= symbol -> boolean
+-- verifica si un operador dado en sintaxis concreta
+-- no está en la lista de unops booleanos.
+|#
 (define (is-not-bool-unop? x) (in-list x not-bool-unops))
 
 #| <binops> ::= + | - | * | / | && | || / = | < | ...
 -- lista de operadores que toman dos valores como parámetros.
 |#
 (define binops (list '+ '- '* '/ '&& '|| '= '> '< '>= '<=))
-(define not-bool-binops (list '+ '- '* '/ '> '< '>= '<=))
+
+#| not-bool-binops? ::= + | - | / | > | < | >= | <=
+-- operadores binarios que no son booleanos
+|#
+(define not-bool-binops (list '+ '- '* '/ '> '< '>= '<= '=))
 
 #| is-binop? ::= Procedure -> boolean
 -- verifica si un operador dado está en la lista de binops.
 |#
 (define (is-binop? x) (member x binops))
+
+#| is-not-bool-binop? ::= Symbol -> boolean
+-- verifica si un operador dado en sintaxis concreta
+-- no está en la lista de binops booleanos.
+|#
 (define (is-not-bool-binop? x) (in-list x not-bool-binops))
 
 #| lookup-fundef: Id List[FunDef] -> FunDef o error
@@ -233,8 +361,7 @@ representation BNF:
          val
          (env-lookup x rest))]))
 
-; Error de runtime: booleano por numero
-(define rtnumberboolean "Runtime type error: expected Number found Boolean")
+
 
 #| interp :: Expr x List[FunDef] x Env -> number|boolean o error
 -- evalua expresiones aritméticas y booleanas
@@ -322,4 +449,8 @@ representation BNF:
 
 ; run : Src x List[FunDef]? -> Val
 (define (run prog [fundefs '()])
-  (interp-prog (parse-prog prog) fundefs empty-env))
+  (define parsed-prog (parse-prog prog))
+    (if (typecheck-prog parsed-prog)
+        (interp-prog parsed-prog fundefs empty-env)
+        (error "Typecheck failed, but it didnt report any specific error :(")))
+
