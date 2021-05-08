@@ -74,6 +74,7 @@ representation BNF:
     [mtTenv (error (format "Static error: free identifier: ~a" x))]
     ))
 
+
 #| extend-tenv-list :: List[Pair[arg, expr]] x Tenv -> Tenv
   -- extiende el ambiente de tipos dado con los args
   -- de la lista entregada como parametro.
@@ -82,9 +83,15 @@ representation BNF:
   (cond
     [(empty? dictlist) tenv]
     [ else
-      (extend-tenv (arg-id (car (first dictlist)))
+      (match (first dictlist)
+        [arg (extend-tenv
+              (arg-id (first dictlist))
+              (arg-type (first dictlist))
+              (extend-tenv-list (rest dictlist) tenv))]
+        [list (extend-tenv (arg-id (car (first dictlist)))
                    (arg-type (car (first dictlist)))
-                  (extend-tenv-list (rest dictlist) tenv))]))
+                  (extend-tenv-list (rest dictlist) tenv))]) ]))
+
 
 #| parse-type: symbol -> Type
 -- realiza el match entre la síntaxis abstracta de un tipo ('Num, 'Bool, 'Any)
@@ -98,6 +105,7 @@ representation BNF:
     [_ Any]
     ))
 
+
 #| dsp-type: Type -> symbol
 -- realiza el match inverso al de parse-type: de Type a sintaxis concreta
 |#
@@ -106,6 +114,7 @@ representation BNF:
     [(equal? Num t) 'Num]
     [(equal? Bool t) 'Bool]
     [else 'Any]))
+
 
 #| string-type: Type -> string
 -- entrega un string correspondiente al tipo ingresado.
@@ -117,6 +126,7 @@ representation BNF:
     [(equal? Num t) "Num"]
     [(equal? Bool t) "Bool"]
     [else "Any"]))
+
 
 #| typecheck-unop: unop expr -> Type | error
 -- recibe un operador unario y una expresion
@@ -138,11 +148,23 @@ representation BNF:
 -- el operador sobre las expresiones, o error si coresponde
 |#
 (define (typecheck-binop op l r tenv)
+  #| bool-op-check: Type Type Type -> Type
+  -- recibe un tipo esperado y dos tipos de operando.
+  -- verifica si los operandos son del tipo esperado
+  -- o si la operación se puede permitir mediante comodín Any.
+  -- retorna #t en dicho caso. #f en caso contrario.
+  |#
   (define (bool-op-check t a b)
     (or (and (equal? a t) (equal? b t))
         (or (and (equal? a Any) (equal? b Any))
             (or (and (equal? a Any) (equal? b t))
                 (or (and (equal? a t) (equal? b Any)))))))
+  #| get-predominant-type Type Type -> Type
+  -- recibe dos tipos y devuelve Any si alguno
+  -- de los dos es Any. En caso contrario, devuelve
+  -- el segundo tipo. Esta función está pensada para usarse sobre tipos compatibles,
+  -- a fin de determinar el tipo del resultado.
+  |#
   (define (get-predominant-type a b)
     (if (equal? a Any)
         a
@@ -155,13 +177,14 @@ representation BNF:
     [(equal? op -) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
     [(equal? op /) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
     [(equal? op *) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
-    [(equal? op =) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
-    [(equal? op >) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
-    [(equal? op <) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
-    [(equal? op <=) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
-    [(equal? op >=) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
+    [(equal? op =) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
+    [(equal? op >) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
+    [(equal? op <) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
+    [(equal? op <=) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
+    [(equal? op >=) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
     [else (if (bool-op-check Bool tl tr) (get-predominant-type tl tr) (error stbooleannumber))];lambdas && ||
     ))))        
+
 
 #| check-pair: (cons arg expr) -> true | error
 -- revisa si un par (argumento, valor) esta bien tipado.
@@ -173,9 +196,10 @@ representation BNF:
   (if  (or (equal? targ tval)
             (equal? targ Any))
          #t
-         (error (string-append "Static type error. Expr type " (string-type tval)
-                            " doesnt match Arg type "(string-type targ)))))))
-  
+         (error (string-append "Static type error: expected " (string-type targ)
+                            " found "(string-type tval)))))))
+
+
 #| typecheck-arg: list((arg, expr)) -> Bool | error
 -- realiza el chequeo de tipos para una lista de pares (argumento, valor),
 -- con valor en sintaxis abstracta (expr). 
@@ -186,12 +210,34 @@ representation BNF:
   (let ([valid-list (map typecheck-pair argsvals)])
   (foldl (lambda (a b) (and a b)) #t argsvals)))
 
-#| typecheck-expr: expr tenv -> Type | error
+#| args-correspondance: list[args] list[expr] -> Bool | error
+-- recibe una lista de argumentos y una lista de expresiones
+-- devuelve true si el tipo de las exprs corresponde con el
+-- tipo del argumento.
+|#
+(define (args-correspondance args exprs)
+  (cond
+    [(and (empty? args) (not (empty? exprs))) (error "Static type error: not enough arguments")]
+    [(and (not (empty? exprs)) (empty? args)) (error "Static type error: too many arguments")]
+    [(and (empty? args) (empty? exprs)) #t]
+    [else
+     (let ([texp (typecheck-expr (car exprs))])
+       (let ([targ (arg-type (car args))])
+     (if (equal? texp targ)
+              (args-correspondance (cdr args) (cdr exprs))
+              (error (string-append "Static type error: expected " (string-type targ)
+                     " found " (string-type texp))))
+              ))
+     ]))
+              
+                  
+  
+#| typecheck-expr: expr x tenv -> Type | error
 -- recibe una expresion, un ambiente de tipos
 -- y retorna el tipo de la expresion
 -- o error si es que corresp onde 
 |#
-(define (typecheck-expr expr tenv)
+(define (typecheck-expr expr [tenv mtTenv] [fundefs '()])
   (match expr
     [(id z) (tenv-lookup z tenv)] 
     [(num n) Num]
@@ -207,14 +253,23 @@ representation BNF:
      (if (equal? tcond Bool)
          (if (or (equal? ttrue tfalse) (or (equal? ttrue Any) (equal? tfalse Any)))
              (if (or (equal? ttrue Any) (equal? tfalse Any)) Any ttrue)
-             (error (string-append "Static type error: found case-true: "(string-type ttrue) " case-false: "(string-type tfalse))))
+             (error (string-append "Static type error: expected "(string-type ttrue)
+                                   " found "(string-type tfalse))))
          (error (string-append "Static type error: expected Bool found " (string-type tcond)))))))]
     [(with argsvals body)
      (if (typecheck-arg argsvals)
          (typecheck-expr body (extend-tenv-list argsvals tenv))
-         (error "Static type error in with")) ; Debería haberse alertado antes.
+         (error "Static type error in with. Unable to specify it.")) ; Debería haberse alertado antes.
      ]
-
+    [(app fid (? list? args))
+     (let([fun (lookup-fundef fid fundefs)])
+     (let([funargs (fundef-args fun)])
+       (if (equal? (length args) (length funargs))
+           (if (args-correspondance funargs args)
+               (fundef-type fun)
+               (error "Static type error in app. Unable to specify it."))
+           (error (string-append "Static type error: arity mismatch - expected " (number->string (length funargs))
+                                 " arguments " (number->string (length args)) " but received " )))))]
    ))
 
 
@@ -226,12 +281,14 @@ representation BNF:
   (let([tfun (fundef-type afun)])
   (let([tbody (typecheck-expr (fundef-body afun) (extend-tenv-list (fundef-args afun) mtTenv))])
   (if (equal? tfun tbody)
-      tfun
+      (dsp-type tfun)
       (if (equal? tbody Any)
-          tfun
-          (error (string-append "Static type error. Function " (fundef-fname afun)
+          (dsp-type tfun)
+          (if (equal? tfun Any)
+              (dsp-type tfun)
+              (error (string-append "Static type error. Function with"
                                 " declared type " (string-type tfun)
-                                " but body has type " (string-type tbody))))))))
+                                " but body has type " (string-type tbody)))))))))
 
 
 #| typecheck-prog: Prog -> Type | error
@@ -241,15 +298,14 @@ representation BNF:
 (define (typecheck-prog aprog)
   (match aprog
     [(prog '() main)
-     (displayln "program without functions")
-     (typecheck-expr main mtTenv)
-     ]
+     (typecheck-expr main mtTenv)]
     [(prog fundefs main)
      (if (map typecheck-fun fundefs)
-          (typecheck-expr main mtTenv)
+          (typecheck-expr main mtTenv fundefs)
           (error "There is a static error in fundefs, but typechecker was not able to
                    detect it :("))]
     ))
+
 
 #| typecheck: expr -> Type | error
 -- recibe la sintaxis concreta de un programa y retorna
@@ -388,7 +444,7 @@ representation BNF:
               (map (lambda (entry) (parse-arg entry)) (rest fname-args))
               Any (parse body))]
     
-    [(list 'define (? list? fname-args) type body)
+    [(list 'define (? list? fname-args) ': type body)
      (fundef (first fname-args)
              (map (lambda (entry) (parse-arg entry)) (rest fname-args))
              (parse-type type) (parse body))]
@@ -407,6 +463,7 @@ representation BNF:
        (prog empty (parse body))]
      [(list fundefs ... main)
       (prog (map (lambda (entry) (parse-fun entry)) fundefs) (parse main))]))
+
 
 #| interp-prog: Prog -> number|boolean|error
 -- interpreta un programa, recuperando las definiciones de funciones
@@ -439,6 +496,7 @@ representation BNF:
      (app (first args) (map parse (rest args)))] ;app
     ))
 
+
 #| parse-arg: Src -> Arg
 -- convierte sintaxis concreta en sintaxis abstracta
 -- del tipo argumento (arg)
@@ -452,6 +510,7 @@ representation BNF:
   [(list x ': t)              ; caso define f { id : type }
    (arg x (parse-type t))]
   ))
+
 
 #|-----------------------------
 Environment abstract data type: Env
@@ -477,7 +536,6 @@ representation BNF:
      (if (or (equal? id x) (equal? id (parse x)))
          val
          (env-lookup x rest))]))
-
 
 
 #| interp :: Expr x List[FunDef] x Env -> number|boolean o error
