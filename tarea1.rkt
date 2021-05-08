@@ -30,7 +30,7 @@
 -- opcional de tipos.
 |#
 (deftype FunDef
-  (fundef fname args body))
+  (fundef fname args type body))
 
 #| <arg> ::= <id> | {<id> : <type>}
 -- representa un argumento de funcion:
@@ -67,23 +67,24 @@ representation BNF:
 
 (define (tenv-lookup x tenv)
   (match tenv
-    [(mtTenv) (error "Static type error: free identifier: ~a" x)]
     [(aTenv id t rest)
      (if (or (equal? id x) (equal? id (parse x)))
          t
-         (tenv-lookup x rest))]))
+         (tenv-lookup x rest))]
+    [mtTenv (error (format "Static error: free identifier: ~a" x))]
+    ))
 
 #| extend-tenv-list :: List[Pair[arg, expr]] x Tenv -> Tenv
   -- extiende el ambiente de tipos dado con los args
   -- de la lista entregada como parametro.
   |#
-(define (extend-tenv-list dictlist env)
+(define (extend-tenv-list dictlist tenv)
   (cond
-    [(empty? dictlist) env]
+    [(empty? dictlist) tenv]
     [ else
       (extend-tenv (arg-id (car (first dictlist)))
                    (arg-type (car (first dictlist)))
-                  (extend-tenv-list (rest dictlist) env))]))
+                  (extend-tenv-list (rest dictlist) tenv))]))
 
 #| parse-type: symbol -> Type
 -- realiza el match entre la síntaxis abstracta de un tipo ('Num, 'Bool, 'Any)
@@ -122,8 +123,8 @@ representation BNF:
 -- y retorna el tipo del resultado de aplicar
 -- el operador sobre la expresion,o error si cor
 |#
-(define (typecheck-unop op p)
-  (let([tp (typecheck-expr p)])
+(define (typecheck-unop op p tenv)
+  (let([tp (typecheck-expr p tenv)])
   (cond
     [(equal? op not) (if (equal? tp Bool) Bool (error stbooleannumber))]
     [(equal? op add1) (if (equal? tp Num) Num (error stnumberboolean))]
@@ -136,7 +137,7 @@ representation BNF:
 -- y retorna el tipo del resultado de aplicar
 -- el operador sobre las expresiones, o error si coresponde
 |#
-(define (typecheck-binop op l r)
+(define (typecheck-binop op l r tenv)
   (define (bool-op-check t a b)
     (or (and (equal? a t) (equal? b t))
         (or (and (equal? a Any) (equal? b Any))
@@ -146,8 +147,8 @@ representation BNF:
     (if (equal? a Any)
         a
         b))
-  (let([tl (typecheck-expr l)])
-  (let([tr (typecheck-expr r)])
+  (let([tl (typecheck-expr l tenv)])
+  (let([tr (typecheck-expr r tenv)])
   (cond
     [(equal? op equal?) (if (and (equal? tl Num)(equal? tr Num)) Num (error stnumberboolean))]
     [(equal? op +) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
@@ -172,7 +173,7 @@ representation BNF:
   (if  (or (equal? targ tval)
             (equal? targ Any))
          #t
-         (error (string-append "Static type error. Value " (string-type tval)
+         (error (string-append "Static type error. Expr type " (string-type tval)
                             " doesnt match Arg type "(string-type targ)))))))
   
 #| typecheck-arg: list((arg, expr)) -> Bool | error
@@ -188,17 +189,17 @@ representation BNF:
 #| typecheck-expr: expr tenv -> Type | error
 -- recibe una expresion, un ambiente de tipos
 -- y retorna el tipo de la expresion
--- o error si es que corresponde 
+-- o error si es que corresp onde 
 |#
 (define (typecheck-expr expr tenv)
   (match expr
-    [(id z) (tenv-lookup z)] 
+    [(id z) (tenv-lookup z tenv)] 
     [(num n) Num]
     [(bool b) Bool]
     [(unop op p)
-     (typecheck-unop op p)]
+     (typecheck-unop op p tenv)]
     [(binop op l r)
-     (typecheck-binop op l r)]
+     (typecheck-binop op l r tenv)]
     [(if0 condition cond-true cond-false)
      (let([tcond (typecheck-expr condition tenv)])
      (let([ttrue (typecheck-expr cond-true tenv)])
@@ -213,6 +214,7 @@ representation BNF:
          (typecheck-expr body (extend-tenv-list argsvals tenv))
          (error "Static type error in with")) ; Debería haberse alertado antes.
      ]
+
    ))
 
 
@@ -221,8 +223,15 @@ representation BNF:
 -- o error si es que corresponde 
 |#
 (define (typecheck-fun afun)
-  (display afun)
-  )
+  (let([tfun (fundef-type afun)])
+  (let([tbody (typecheck-expr (fundef-body afun) (extend-tenv-list (fundef-args afun) mtTenv))])
+  (if (equal? tfun tbody)
+      tfun
+      (if (equal? tbody Any)
+          tfun
+          (error (string-append "Static type error. Function " (fundef-fname afun)
+                                " declared type " (string-type tfun)
+                                " but body has type " (string-type tbody))))))))
 
 
 #| typecheck-prog: Prog -> Type | error
@@ -251,8 +260,6 @@ representation BNF:
   (dsp-type(typecheck-prog (parse-prog src)))
   )
 
-
-  
   
 #| <expr> ::= <num>
          | <id> 
@@ -336,7 +343,7 @@ representation BNF:
 |#
 (define (lookup-fundef fname fundefs)
   (match fundefs
-    ['() (error "undefined function:" fname)]
+    ['() (error "Static error: undefined function:" fname)]
     [(cons fd fds) (if (eq? (fundef-fname fd) fname)
                        fd
                        (lookup-fundef fname fds))]))
@@ -377,9 +384,14 @@ representation BNF:
 (define (parse-fun src)
   (match src
     [(list 'define (? list? fname-args) body)
-     ( fundef (first fname-args)
-              (map (lambda (entry) (parse entry)) (rest fname-args))
-              (parse body))]
+     (fundef (first fname-args)
+              (map (lambda (entry) (parse-arg entry)) (rest fname-args))
+              Any (parse body))]
+    
+    [(list 'define (? list? fname-args) type body)
+     (fundef (first fname-args)
+             (map (lambda (entry) (parse-arg entry)) (rest fname-args))
+             (parse-type type) (parse body))]
     ))
 
 
@@ -433,9 +445,11 @@ representation BNF:
 |#
 (define (parse-arg src)
   (match src
-  [(list x val)
+  [(list x val)               ; caso with ... { id val} ... y define f { id } 
    (arg x Any)]
-  [(list x ': t val)
+  [(list x ': t val)          ; caso with ... { id : type val } ...
+   (arg x (parse-type t))]
+  [(list x ': t)              ; caso define f { id : type }
    (arg x (parse-type t))]
   ))
 
@@ -543,7 +557,7 @@ representation BNF:
     [(with dictlist b)
      (interp b fundefs (extend-env-list dictlist env))]
     [(app f es)
-     (def (fundef _ args body) (lookup-fundef f fundefs))
+     (def (fundef _ args type body) (lookup-fundef f fundefs))
      (interp body fundefs (app-map-list args es))] ;; queremos scope lexico!
     ))
 
