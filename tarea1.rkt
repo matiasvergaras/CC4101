@@ -12,7 +12,10 @@
 |#
 ; Error de runtime: booleano por numero
 (define rtnumberboolean "Runtime type error: expected Number found Boolean")
-
+; Error estatico: numero por booleano
+(define stbooleannumber "Static type error: expected Bool found Num")
+; Error estatico: booleano por numero
+(define stnumberboolean "Static type error: expected Num found Bool")
 
 #| <prog> ::= {<fundef>* <expr>}
 -- un programa se compone de 0 o mas deifniciones de funciones y una expresion final
@@ -44,6 +47,44 @@
   [Bool]
   [Any])
 
+#|-----------------------------
+Type environment abstract data type: Tenv
+empty-Tenv  :: Tenv
+extend-Tenv :: Sym Type Env -> Env
+Tenv-lookup :: Sym Env -> Type (o error)
+
+representation BNF:
+<Tenv> ::= (mtTenv)
+        | (aTenv <id> <Type> <env>)
+|#
+
+(deftype Tenv
+  (mtTenv)
+  (aTenv id t tenv))
+
+(define empty-tenv  (mtTenv))
+(define extend-tenv aTenv)
+
+(define (tenv-lookup x tenv)
+  (match tenv
+    [(mtTenv) (error "Static type error: free identifier: ~a" x)]
+    [(aTenv id t rest)
+     (if (or (equal? id x) (equal? id (parse x)))
+         t
+         (tenv-lookup x rest))]))
+
+#| extend-tenv-list :: List[Pair[arg, expr]] x Tenv -> Tenv
+  -- extiende el ambiente de tipos dado con los args
+  -- de la lista entregada como parametro.
+  |#
+(define (extend-tenv-list dictlist env)
+  (cond
+    [(empty? dictlist) env]
+    [ else
+      (extend-tenv (arg-id (car (first dictlist)))
+                   (arg-type (car (first dictlist)))
+                  (extend-tenv-list (rest dictlist) env))]))
+
 #| parse-type: symbol -> Type
 -- realiza el match entre la síntaxis abstracta de un tipo ('Num, 'Bool, 'Any)
 -- y el tipo Type correspondiente.
@@ -59,13 +100,22 @@
 #| dsp-type: Type -> symbol
 -- realiza el match inverso al de parse-type: de Type a sintaxis concreta
 |#
-(define (dsp-type src)
+(define (dsp-type t)
   (cond
-    [(equal? Num src) 'Num]
-    [(equal? Bool src) 'Bool]
+    [(equal? Num t) 'Num]
+    [(equal? Bool t) 'Bool]
     [else 'Any]))
 
-(define (binop-num-procs) (list + - = / * >= <= > <))  
+#| string-type: Type -> string
+-- entrega un string correspondiente al tipo ingresado.
+-- Simplifica la sintaxis de los errores no triviales de mostrar
+-- (aquellos en que T1 y T2 no son siempre el mismo).
+|#
+(define (string-type t)
+  (cond
+    [(equal? Num t) "Num"]
+    [(equal? Bool t) "Bool"]
+    [else "Any"]))
 
 #| typecheck-unop: unop expr -> Type | error
 -- recibe un operador unario y una expresion
@@ -75,51 +125,95 @@
 (define (typecheck-unop op p)
   (let([tp (typecheck-expr p)])
   (cond
-    [(equal? op not) (if (equal? tp Bool) Bool (error "Expected Bool, found Num"))]
-    [(equal? op add1) (if (equal? tp Num) Num (error "Expected Num, found Bool"))]
-    [(equal? op sub1) (if (equal? tp Num) Num (error "Expected Num, found Bool"))]
+    [(equal? op not) (if (equal? tp Bool) Bool (error stbooleannumber))]
+    [(equal? op add1) (if (equal? tp Num) Num (error stnumberboolean))]
+    [(equal? op sub1) (if (equal? tp Num) Num (error stnumberboolean))]
     )))
 
 
 #| typecheck-binop: binop expr expr -> Type | error
 -- recibe un operador binario y dos expresiones
 -- y retorna el tipo del resultado de aplicar
--- el operador sobre las expresiones, o error si cor
+-- el operador sobre las expresiones, o error si coresponde
 |#
 (define (typecheck-binop op l r)
+  (define (bool-op-check t a b)
+    (or (and (equal? a t) (equal? b t))
+        (or (and (equal? a Any) (equal? b Any))
+            (or (and (equal? a Any) (equal? b t))
+                (or (and (equal? a t) (equal? b Any)))))))
+  (define (get-predominant-type a b)
+    (if (equal? a Any)
+        a
+        b))
   (let([tl (typecheck-expr l)])
   (let([tr (typecheck-expr r)])
   (cond
-    [(equal? op equal?) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
-    [(equal? op +) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
-    [(equal? op -) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
-    [(equal? op /) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
-    [(equal? op *) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
-    [(equal? op =) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
-    [(equal? op >) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
-    [(equal? op <) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
-    [(equal? op <=) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
-    [(equal? op >=) (if (and (equal? tl Num)(equal? tr Num)) Num (error "Expected Num, found Bool"))]
-    [else Bool] ; and y or devuelven siempre un booleano, independiente
-    ))))        ; de si reciben nums, bools, o una mezcla de ambos.
+    [(equal? op equal?) (if (and (equal? tl Num)(equal? tr Num)) Num (error stnumberboolean))]
+    [(equal? op +) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
+    [(equal? op -) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
+    [(equal? op /) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
+    [(equal? op *) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
+    [(equal? op =) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
+    [(equal? op >) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
+    [(equal? op <) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
+    [(equal? op <=) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
+    [(equal? op >=) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
+    [else (if (bool-op-check Bool tl tr) (get-predominant-type tl tr) (error stbooleannumber))];lambdas && ||
+    ))))        
 
-#| typecheck-expr: expr -> Type | error
--- recibe una expresion y retorna su tipo
+#| check-pair: (cons arg expr) -> true | error
+-- revisa si un par (argumento, valor) esta bien tipado.
+-- retorna true en caso correcto, error en caso contrario.
+|#
+(define (typecheck-pair argval)
+  (let([targ (arg-type (car argval))])
+  (let([tval (typecheck-expr (car (cdr argval)) mtTenv)])
+  (if  (or (equal? targ tval)
+            (equal? targ Any))
+         #t
+         (error (string-append "Static type error. Value " (string-type tval)
+                            " doesnt match Arg type "(string-type targ)))))))
+  
+#| typecheck-arg: list((arg, expr)) -> Bool | error
+-- realiza el chequeo de tipos para una lista de pares (argumento, valor),
+-- con valor en sintaxis abstracta (expr). 
+-- si todos los valores calzan con el tipo declarado para el argumento,
+-- retorna true. En caso contrario, false.
+|#
+(define (typecheck-arg argsvals)
+  (let ([valid-list (map typecheck-pair argsvals)])
+  (foldl (lambda (a b) (and a b)) #t argsvals)))
+
+#| typecheck-expr: expr tenv -> Type | error
+-- recibe una expresion, un ambiente de tipos
+-- y retorna el tipo de la expresion
 -- o error si es que corresponde 
 |#
-(define (typecheck-expr expr)
+(define (typecheck-expr expr tenv)
   (match expr
+    [(id z) (tenv-lookup z)] 
     [(num n) Num]
     [(bool b) Bool]
     [(unop op p)
      (typecheck-unop op p)]
     [(binop op l r)
      (typecheck-binop op l r)]
-    [(if0 condition cond-true cond-false)(display "mañana sigo :D")]
+    [(if0 condition cond-true cond-false)
+     (let([tcond (typecheck-expr condition tenv)])
+     (let([ttrue (typecheck-expr cond-true tenv)])
+     (let([tfalse (typecheck-expr cond-false tenv)])
+     (if (equal? tcond Bool)
+         (if (or (equal? ttrue tfalse) (or (equal? ttrue Any) (equal? tfalse Any)))
+             (if (or (equal? ttrue Any) (equal? tfalse Any)) Any ttrue)
+             (error (string-append "Static type error: found case-true: "(string-type ttrue) " case-false: "(string-type tfalse))))
+         (error (string-append "Static type error: expected Bool found " (string-type tcond)))))))]
+    [(with argsvals body)
+     (if (typecheck-arg argsvals)
+         (typecheck-expr body (extend-tenv-list argsvals tenv))
+         (error "Static type error in with")) ; Debería haberse alertado antes.
+     ]
    ))
-
-
-
 
 
 #| typecheck-fun: Fundef -> Type | error
@@ -139,15 +233,12 @@
   (match aprog
     [(prog '() main)
      (displayln "program without functions")
-     (typecheck-expr main)
+     (typecheck-expr main mtTenv)
      ]
     [(prog fundefs main)
      (if (map typecheck-fun fundefs)
-           (if (typecheck-expr main)
-               (typecheck-expr main)
-               (error "There is a static error in main, but typechecker was not able to
-                       detect it :("))
-           (error "There is a static error in fundefs, but typechecker was not able to
+          (typecheck-expr main mtTenv)
+          (error "There is a static error in fundefs, but typechecker was not able to
                    detect it :("))]
     ))
 
@@ -169,7 +260,8 @@
          | {<unop> <expr>}                 operador unario: add1, sub1, !.
          | {<binop> <expr> <expr>}         operador binario: +, -, *, /, etc.
          | {if <expr> <expr> <expr>}       if (condition)(true)(false) 
-         | {with {{<id> <expr>}*} <expr>}  
+         | {with {{<id> <expr>}*} <expr>}  ; with P1, sin tipos
+         | {with {{<arg> <expr>}*} <expr>} ; with P2 incorporacion de tipo
          | {<id> <expr>*}
 -- representa una expresión en el lenguaje.
 -- una expresión puede ser un número, un identificador, un booleano, un operador
@@ -329,12 +421,23 @@
     [(list 'if condition cond-true cond-false)
      (if0 (parse condition) (parse cond-true) (parse cond-false))]
     [(list 'with (? list? dict) body)
-     (with (map (lambda(entry) (list(car entry) (parse (car(cdr entry))))) dict)
+     (with (map (lambda(entry) (list (parse-arg entry) (parse (car(reverse entry))))) dict)
            (parse body))]
-
     [(? list? args) 
      (app (first args) (map parse (rest args)))] ;app
     ))
+
+#| parse-arg: Src -> Arg
+-- convierte sintaxis concreta en sintaxis abstracta
+-- del tipo argumento (arg)
+|#
+(define (parse-arg src)
+  (match src
+  [(list x val)
+   (arg x Any)]
+  [(list x ': t val)
+   (arg x (parse-type t))]
+  ))
 
 #|-----------------------------
 Environment abstract data type: Env
@@ -367,7 +470,6 @@ representation BNF:
 -- evalua expresiones aritméticas y booleanas
 |#
 (define (interp expr fundefs env)
-  ;- expresaremos 'numero o booleano' como number|boolean.
   #| interp-binop :: Expr x number|boolean x number|boolean -> number|boolean o error
   -- verifica que los resultados de interpretar los operandos de un
   -- operador binario correspondan a los tipos que dicho
@@ -404,13 +506,13 @@ representation BNF:
   -- extiende el ambiente dado con los pares (identificador, expr)
   -- de la lista entregada como parametro, interpretando las expr.
   |#
-  (define (extend-env-list dictlist)
+  (define (extend-env-list dictlist env)
     (cond
       [(empty? dictlist) env]
       [ else
         (extend-env (car (first dictlist))
                     (interp (car(cdr (first dictlist))) fundefs env)
-                    (extend-env-list (rest dictlist)))]))
+                    (extend-env-list (rest dictlist) env))]))
 
   #| app-map-list :: List[id] x List[expr] -> Env
   -- extiende el ambiente dado con los pares (identificador, expr)
@@ -439,7 +541,7 @@ representation BNF:
                 (interp cond-true fundefs env)
                 (interp cond-false fundefs env))]
     [(with dictlist b)
-     (interp b fundefs (extend-env-list dictlist))]
+     (interp b fundefs (extend-env-list dictlist env))]
     [(app f es)
      (def (fundef _ args body) (lookup-fundef f fundefs))
      (interp body fundefs (app-map-list args es))] ;; queremos scope lexico!
@@ -450,7 +552,7 @@ representation BNF:
 ; run : Src x List[FunDef]? -> Val
 (define (run prog [fundefs '()])
   (define parsed-prog (parse-prog prog))
-    (if (typecheck-prog parsed-prog)
+    (if (typecheck-prog parsed-prog empty-tenv)
         (interp-prog parsed-prog fundefs empty-env)
         (error "Typecheck failed, but it didnt report any specific error :(")))
 
