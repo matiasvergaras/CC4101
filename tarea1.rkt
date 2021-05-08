@@ -75,6 +75,7 @@ representation BNF:
     ))
 
 
+
 #| extend-tenv-list :: List[Pair[arg, expr]] x Tenv -> Tenv
   -- extiende el ambiente de tipos dado con los args
   -- de la lista entregada como parametro.
@@ -82,15 +83,21 @@ representation BNF:
 (define (extend-tenv-list dictlist tenv)
   (cond
     [(empty? dictlist) tenv]
-    [ else
+    [else
       (match (first dictlist)
-        [arg (extend-tenv
-              (arg-id (first dictlist))
-              (arg-type (first dictlist))
+        [(? arg? a)
+         (extend-tenv
+               (arg-id a)
+               (arg-type a)
+              (extend-tenv-list (rest dictlist) tenv))]
+        [(list (? arg? a))
+              (extend-tenv
+               (arg-id a)
+               (arg-type a)
               (extend-tenv-list (rest dictlist) tenv))]
         [list (extend-tenv (arg-id (car (first dictlist)))
                    (arg-type (car (first dictlist)))
-                  (extend-tenv-list (rest dictlist) tenv))]) ]))
+                  (extend-tenv-list (rest dictlist) tenv))])]))
 
 
 #| parse-type: symbol -> Type
@@ -532,8 +539,8 @@ representation BNF:
 (define (env-lookup x env)
   (match env
     [(mtEnv) (error 'env-lookup "free identifier: ~a" x)]
-    [(aEnv id val rest)
-     (if (or (equal? id x) (equal? id (parse x)))
+    [(aEnv arg val rest)
+     (if (or (equal? (arg-id arg) x) (equal? (arg-id arg) (parse x)))
          val
          (env-lookup x rest))]))
 
@@ -578,13 +585,13 @@ representation BNF:
   -- extiende el ambiente dado con los pares (identificador, expr)
   -- de la lista entregada como parametro, interpretando las expr.
   |#
-  (define (extend-env-list dictlist env)
+  (define (extend-env-list dictlist)
     (cond
       [(empty? dictlist) env]
       [ else
-        (extend-env (car (first dictlist))
+        ( extend-env (car (first dictlist))
                     (interp (car(cdr (first dictlist))) fundefs env)
-                    (extend-env-list (rest dictlist) env))]))
+                    (extend-env-list (rest dictlist)))]))
 
   #| app-map-list :: List[id] x List[expr] -> Env
   -- extiende el ambiente dado con los pares (identificador, expr)
@@ -613,7 +620,7 @@ representation BNF:
                 (interp cond-true fundefs env)
                 (interp cond-false fundefs env))]
     [(with dictlist b)
-     (interp b fundefs (extend-env-list dictlist env))]
+     (interp b fundefs (extend-env-list dictlist))]
     [(app f es)
      (def (fundef _ args type body) (lookup-fundef f fundefs))
      (interp body fundefs (app-map-list args es))] ;; queremos scope lexico!
@@ -624,7 +631,6 @@ representation BNF:
 ; run : Src x List[FunDef]? -> Val
 (define (run prog [fundefs '()])
   (define parsed-prog (parse-prog prog))
-    (if (typecheck-prog parsed-prog empty-tenv)
+    (if (typecheck-prog parsed-prog)
         (interp-prog parsed-prog fundefs empty-env)
         (error "Typecheck failed, but it didnt report any specific error :(")))
-
