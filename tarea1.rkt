@@ -41,6 +41,26 @@
   [arg id type]
   [argcon id type cont])
 
+#| argument-id:: Arg -> id
+-- recibe una estructura del tipo Arg
+-- y devuelve el id correspondiente.
+|#
+(define (argument-id ar)
+  (match ar
+    [(? aid? ar) (aid-id ar)]
+    [(? arg? ar) (arg-id ar)]
+    [(? argcon? ar) (argcon-id ar)]))
+
+#| argument-type:: Arg -> Type
+-- recibe una estructura del tipo Arg
+-- y devuelve el tipo correspondiente
+|#
+(define (argument-type ar)
+  (match ar
+    [(? aid? ar) Any]
+    [(? arg? ar) (arg-type ar)]
+    [(? argcon? ar) (argcon-type ar)]))
+
 #| <type>:: = Num | Bool | Any
 -- representa el tipo de una expresión, argumento o función.
 |#
@@ -57,22 +77,22 @@ Tenv-lookup :: Sym Env -> Type (o error)
 
 representation BNF:
 <Tenv> ::= (mtTenv)
-        | (aTenv <arg> <env>)
+        | (aTenv <Arg> <env>)
 |#
 
 (deftype Tenv
   (mtTenv)
   (aTenv ar tenv))
 
-(define empty-tenv  (mtTenv))
+(define empty-tenv (mtTenv))
 (define extend-tenv aTenv)
 
 (define (tenv-lookup x tenv)
   (match tenv
-    [(aTenv ar rest)
-      (if (or (equal? (arg-id ar) x) (equal? (arg-id ar) (parse x)))
-         (arg-type ar)
-         (tenv-lookup x rest))]
+    [(aTenv ar rest) 
+       (if (or (equal? (argument-id ar) x) (equal? (argument-id ar) (parse x)))
+           (argument-type ar)
+           (tenv-lookup x rest))]
     [mtTenv (error (format "Static error: free identifier: ~a" x))]
     ))
 
@@ -212,7 +232,7 @@ representation BNF:
       [(and (empty? args) (empty? exprs)) #t]
       [else
        (let ([texp (typecheck-expr (car exprs) tenv fundefs)])
-         (let ([targ (arg-type (car args))])
+         (let ([targ (argument-type(car args))])
        (if (or (equal? texp targ)(or (equal? targ Any) (equal? texp Any)))
                 (args-correspondance (cdr args) (cdr exprs))
                 (error (string-append "Static type error: expected " (string-type targ)
@@ -261,7 +281,8 @@ representation BNF:
 |#
 (define (typecheck-fun afun)
   (let([tfun (fundef-type afun)])
-  (let([tbody (typecheck-expr (fundef-body afun) (extend-tenv-list (fundef-args afun) mtTenv))])
+  (let([tbody (typecheck-expr (fundef-body afun)
+                              (extend-tenv-list (fundef-args afun) mtTenv))])
   (if (equal? tfun tbody)
       (dsp-type tfun)
       (if (equal? tbody Any)
@@ -278,10 +299,10 @@ representation BNF:
 |#
 (define (extend-tenv-list dictlist tenv)
   (cond
-    [(empty? dictlist) tenv]
+    [(empty? dictlist) mtTenv]
     [else
       (match (first dictlist)
-        [(? arg? a)
+        [(or (? arg? a) (? argcon? a))
          (extend-tenv a (extend-tenv-list (rest dictlist) tenv))]
         [(list (? arg? a))
          (extend-tenv a (extend-tenv-list (rest dictlist) tenv))]
@@ -295,10 +316,11 @@ representation BNF:
 -- de los parámetros de las funciones.
 |#
 (define (extend-tenv-fun fundefs atenv)
+  (let([mt mtTenv])
   (match fundefs
-    [empty mtTenv]
-    [list (for-each (lambda (entry)
-                      (extend-tenv-list (fundef-args entry atenv)))
+    ['() mtTenv]
+    [else (map (lambda (entry)
+                      (extend-tenv-list (fundef-args entry) atenv))
                       fundefs)]
     ))
 
@@ -310,11 +332,16 @@ representation BNF:
 -- Retorna true si se cumple para todos, false si no.
 |#
 (define (typecheck-contracts tenv fundefs)
+  (displayln "plop1")
+  (displayln tenv)
   (match tenv
-    [(aTenv ar rest)
+    [(list (aTenv ar rest) ...)
+     (displayln "plop2")
+     (displayln ar)
      (match ar
-       [(argcon id type cont)
-        (let([fcont (lookup-fundef cont fundefs)])
+       [(list (? argcon? a) ...)
+        (displayln "plop3")
+        (let([fcont (lookup-fundef (argcon-cont a) fundefs)])
           (if (equal? (typecheck-fun fcont) Bool)
               (if (equal? (length (fundef-args fcont)) 1)
                   (typecheck-contracts rest fundefs)
@@ -324,8 +351,8 @@ representation BNF:
                   )
               (error (string-append "Static contract error: invalid type for " fcont )))
           )]
-       [else (typecheck-contracts rest fundefs)]
-       )]
+       [else (typecheck-contracts rest fundefs)])
+       ]
     [mtTenv #t]
     ))
 
@@ -339,9 +366,9 @@ representation BNF:
      (typecheck-expr main mtTenv)]
     [(prog fundefs main)
      (if (map typecheck-fun fundefs)
-         (let([ftenv (
+         (let([ftenv 
          (extend-tenv-fun fundefs mtTenv)
-         )])
+         ])
          (typecheck-contracts ftenv fundefs)
          (typecheck-expr main ftenv fundefs))
          (error "There is a static error in fundefs, but typechecker was not able to
@@ -583,7 +610,7 @@ representation BNF:
   (match env
     [(mtEnv) (error 'env-lookup "free identifier: ~a" x)]
     [(aEnv arg val rest)
-     (if (or (equal? (arg-id arg) x) (equal? (arg-id arg) (parse x)))
+     (if (or (equal? (argument-id arg) x) (equal? (argument-id arg) (parse x)))
          val
          (env-lookup x rest))]))
 
@@ -677,3 +704,72 @@ representation BNF:
     (if (typecheck-prog parsed-prog)
         (interp-prog parsed-prog fundefs empty-env)
         (error "Typecheck failed, but it didnt report any specific error :(")))
+
+
+(test (run '{ ;; Programa de Ejemplo 1
+   {define {sum x y z} {+ x {+ y z}}}
+   {define {max x y} {if {< x y} y x}}
+   {with {{x 9}}
+        {sum {max x 6} 2 -10} }
+}) 1)
+
+(test (run '{ ;; Programa de Ejemplo 2
+   {with {{x 5} {y 7} {z 42}}
+         z}
+}) 42)
+
+(test (run '{ ;; Programa de Ejemplo 3
+   {define {triple x} {* 3 x}}
+   {define {add2 x} {+ 2 x}}
+   {add2 {triple 2}}
+}) 8)
+
+(test (run '{{with {{x : Num 5} {y : Num 10}} {+ x y}}}) 15)
+
+(test (run '{{define {gt42 x} : Bool {> x 42}}
+ {gt42 43}}) #t)
+
+(test (run '{{define {id {x : Num}} x}
+ {id 5}}) 5)
+
+(test/exn (run '{{define {add2 {x : Num}} {+ x 2}}
+ {with {{oops #f}}
+   {add2 oops}}}) "Runtime type error")
+
+(test (typecheck '{3}) 'Num)
+
+(test (typecheck '{{define {f {p : Bool}} {&& p {! p}}}
+                          {f {> 3 4}}}) 'Any)
+
+(test/exn (typecheck '{{define {one {x : Num}} 1}
+                          {one #t}}) "Static type error: expected Num found Bool")
+
+(test/exn (typecheck '{{> 10 #t}})
+  "Static type error: expected Num found Bool")
+
+(test/exn (typecheck '{{if 73 #t #t}})
+  "Static type error: expected Bool found Num")
+
+(test/exn (typecheck '{{with {{x 5} {y : Num #t} {z 42}}
+                            z}})
+  "Static type error: expected Num found Bool")
+
+;(test/exn (run '{{define {positive x} : Bool {> x 0}}
+; {define {div {z : Num @ positive} y}
+;           {/ y -1}}
+; {div -1 3}}) "contract")
+
+; ================== TESTS PERSONALIZADOS =================
+
+; para revisar que una definicion de funcion no sobreescriba a la otra
+(test (run '{{define {double {x : Num}} {+ x x}}
+         {define {triple {x : Num}}
+           {+ {+ x x} x}}
+ {double 25}}) 50)
+
+; lo mismo pero en el orden inverso (la funcion buscada es la ultima en
+; guardar x)
+(test (run '{{define {double {x : Num}} {+ x x}}
+         {define {triple {x : Num}}
+           {+ {+ x x} x}}
+ {triple 25}}) 75)
