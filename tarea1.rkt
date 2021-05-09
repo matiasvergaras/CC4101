@@ -55,50 +55,24 @@ Tenv-lookup :: Sym Env -> Type (o error)
 
 representation BNF:
 <Tenv> ::= (mtTenv)
-        | (aTenv <id> <Type> <env>)
+        | (aTenv <arg> <env>)
 |#
 
 (deftype Tenv
   (mtTenv)
-  (aTenv id t tenv))
+  (aTenv ar tenv))
 
 (define empty-tenv  (mtTenv))
 (define extend-tenv aTenv)
 
 (define (tenv-lookup x tenv)
   (match tenv
-    [(aTenv id t rest)
-     (if (or (equal? id x) (equal? id (parse x)))
-         t
+    [(aTenv ar rest)
+      (if (or (equal? (arg-id ar) x) (equal? (arg-id ar) (parse x)))
+         (arg-type ar)
          (tenv-lookup x rest))]
     [mtTenv (error (format "Static error: free identifier: ~a" x))]
     ))
-
-
-
-#| extend-tenv-list :: List[Pair[arg, expr]] x Tenv -> Tenv
-  -- extiende el ambiente de tipos dado con los args
-  -- de la lista entregada como parametro.
-  |#
-(define (extend-tenv-list dictlist tenv)
-  (cond
-    [(empty? dictlist) tenv]
-    [else
-      (match (first dictlist)
-        [(? arg? a)
-         (extend-tenv
-               (arg-id a)
-               (arg-type a)
-              (extend-tenv-list (rest dictlist) tenv))]
-        [(list (? arg? a))
-              (extend-tenv
-               (arg-id a)
-               (arg-type a)
-              (extend-tenv-list (rest dictlist) tenv))]
-        [list (extend-tenv (arg-id (car (first dictlist)))
-                   (arg-type (car (first dictlist)))
-                  (extend-tenv-list (rest dictlist) tenv))])]))
-
 
 #| parse-type: symbol -> Type
 -- realiza el match entre la síntaxis abstracta de un tipo ('Num, 'Bool, 'Any)
@@ -140,8 +114,8 @@ representation BNF:
 -- y retorna el tipo del resultado de aplicar
 -- el operador sobre la expresion,o error si cor
 |#
-(define (typecheck-unop op p tenv)
-  (let([tp (typecheck-expr p tenv)])
+(define (typecheck-unop op p tenv fundefs)
+  (let([tp (typecheck-expr p tenv fundefs)])
   (cond
     [(equal? op not) (if (equal? tp Bool) Bool (error stbooleannumber))]
     [(equal? op add1) (if (equal? tp Num) Num (error stnumberboolean))]
@@ -154,7 +128,7 @@ representation BNF:
 -- y retorna el tipo del resultado de aplicar
 -- el operador sobre las expresiones, o error si coresponde
 |#
-(define (typecheck-binop op l r tenv)
+(define (typecheck-binop op l r tenv fundefs)
   #| bool-op-check: Type Type Type -> Type
   -- recibe un tipo esperado y dos tipos de operando.
   -- verifica si los operandos son del tipo esperado
@@ -176,8 +150,8 @@ representation BNF:
     (if (equal? a Any)
         a
         b))
-  (let([tl (typecheck-expr l tenv)])
-  (let([tr (typecheck-expr r tenv)])
+  (let([tl (typecheck-expr l tenv fundefs)])
+  (let([tr (typecheck-expr r tenv fundefs)])
   (cond
     [(equal? op equal?) (if (and (equal? tl Num)(equal? tr Num)) Num (error stnumberboolean))]
     [(equal? op +) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
@@ -197,9 +171,9 @@ representation BNF:
 -- revisa si un par (argumento, valor) esta bien tipado.
 -- retorna true en caso correcto, error en caso contrario.
 |#
-(define (typecheck-pair argval)
+(define (typecheck-pair argval tenv fundefs)
   (let([targ (arg-type (car argval))])
-  (let([tval (typecheck-expr (car (cdr argval)) mtTenv)])
+  (let([tval (typecheck-expr (car (cdr argval)) tenv fundefs)])
   (if  (or (equal? targ tval)
             (equal? targ Any))
          #t
@@ -208,13 +182,12 @@ representation BNF:
 
 
 #| typecheck-arg: list((arg, expr)) -> Bool | error
--- realiza el chequeo de tipos para una lista de pares (argumento, valor),
--- con valor en sintaxis abstracta (expr). 
--- si todos los valores calzan con el tipo declarado para el argumento,
+-- realiza el chequeo de tipos para una lista de pares (argumento, expr)
+-- si todas las expresiones calzan con el tipo declarado para su argumento,
 -- retorna true. En caso contrario, false.
 |#
-(define (typecheck-arg argsvals)
-  (let ([valid-list (map typecheck-pair argsvals)])
+(define (typecheck-arg argsvals tenv fundefs)
+  (let ([valid-list (map typecheck-pair argsvals tenv fundefs)])
   (foldl (lambda (a b) (and a b)) #t argsvals)))
 
 #| args-correspondance: list[args] list[expr] -> Bool | error
@@ -222,22 +195,21 @@ representation BNF:
 -- devuelve true si el tipo de las exprs corresponde con el
 -- tipo del argumento.
 |#
-(define (args-correspondance args exprs)
+(define (args-correspondance args exprs tenv fundefs)
   (cond
     [(and (empty? args) (not (empty? exprs))) (error "Static type error: not enough arguments")]
     [(and (not (empty? exprs)) (empty? args)) (error "Static type error: too many arguments")]
     [(and (empty? args) (empty? exprs)) #t]
     [else
-     (let ([texp (typecheck-expr (car exprs))])
+     (let ([texp (typecheck-expr (car exprs tenv fundefs))])
        (let ([targ (arg-type (car args))])
-     (if (equal? texp targ)
-              (args-correspondance (cdr args) (cdr exprs))
+     (if (or (equal? texp targ)(equal? targ Any))
+              (args-correspondance (cdr args) (cdr exprs) tenv fundefs)
               (error (string-append "Static type error: expected " (string-type targ)
                      " found " (string-type texp))))
               ))
      ]))
-              
-                  
+                          
   
 #| typecheck-expr: expr x tenv -> Type | error
 -- recibe una expresion, un ambiente de tipos
@@ -250,13 +222,13 @@ representation BNF:
     [(num n) Num]
     [(bool b) Bool]
     [(unop op p)
-     (typecheck-unop op p tenv)]
+     (typecheck-unop op p tenv fundefs)]
     [(binop op l r)
-     (typecheck-binop op l r tenv)]
+     (typecheck-binop op l r tenv fundefs)]
     [(if0 condition cond-true cond-false)
-     (let([tcond (typecheck-expr condition tenv)])
-     (let([ttrue (typecheck-expr cond-true tenv)])
-     (let([tfalse (typecheck-expr cond-false tenv)])
+     (let([tcond (typecheck-expr condition tenv fundefs)])
+     (let([ttrue (typecheck-expr cond-true tenv fundefs)])
+     (let([tfalse (typecheck-expr cond-false tenv fundefs)])
      (if (equal? tcond Bool)
          (if (or (equal? ttrue tfalse) (or (equal? ttrue Any) (equal? tfalse Any)))
              (if (or (equal? ttrue Any) (equal? tfalse Any)) Any ttrue)
@@ -264,15 +236,15 @@ representation BNF:
                                    " found "(string-type tfalse))))
          (error (string-append "Static type error: expected Bool found " (string-type tcond)))))))]
     [(with argsvals body)
-     (if (typecheck-arg argsvals)
-         (typecheck-expr body (extend-tenv-list argsvals tenv))
+     (if (typecheck-arg argsvals tenv fundefs)
+         (typecheck-expr body (extend-tenv-list argsvals tenv) fundefs)
          (error "Static type error in with. Unable to specify it.")) ; Debería haberse alertado antes.
      ]
     [(app fid (? list? args))
      (let([fun (lookup-fundef fid fundefs)])
      (let([funargs (fundef-args fun)])
        (if (equal? (length args) (length funargs))
-           (if (args-correspondance funargs args)
+           (if (args-correspondance funargs args tenv fundefs)
                (fundef-type fun)
                (error "Static type error in app. Unable to specify it."))
            (error (string-append "Static type error: arity mismatch - expected " (number->string (length funargs))
@@ -297,6 +269,39 @@ representation BNF:
                                 " declared type " (string-type tfun)
                                 " but body has type " (string-type tbody)))))))))
 
+#| extend-tenv-list :: List[Pair[arg, expr]] x Tenv -> Tenv
+-- extiende el ambiente de tipos dado con los args
+-- de la lista entregada como parametro.
+|#
+(define (extend-tenv-list dictlist tenv)
+  (cond
+    [(empty? dictlist) tenv]
+    [else
+      (match (first dictlist)
+        [(? arg? a)
+         (extend-tenv
+               a
+              (extend-tenv-list (rest dictlist) tenv))]
+        [(list (? arg? a))
+              (extend-tenv
+               a
+              (extend-tenv-list (rest dictlist) tenv))]
+        [list (extend-tenv (car (first dictlist))
+                  (extend-tenv-list (rest dictlist) tenv))])]))
+
+
+#| extend-tenv-fun: List[Fundef] tenv -> tenv
+-- recibe una lista de funciones y un ambiente de tipos.
+-- retorna el ambiente extendido con los tipos
+-- de los parámetros de las funciones.
+|#
+(define (extend-tenv-fun funs atenv)
+  (match funs
+    [empty mtTenv]
+    [list (for-each (lambda (entry)
+                      (extend-tenv-list (fundef-args entry atenv)))
+                      funs)]
+    ))
 
 #| typecheck-prog: Prog -> Type | error
 -- recibe un programa y retorna su tipo
@@ -308,8 +313,13 @@ representation BNF:
      (typecheck-expr main mtTenv)]
     [(prog fundefs main)
      (if (map typecheck-fun fundefs)
-          (typecheck-expr main mtTenv fundefs)
-          (error "There is a static error in fundefs, but typechecker was not able to
+         (let([ftenv (
+         (extend-tenv-fun fundefs mtTenv)
+         )])
+         (displayln "just to be sure")
+         (displayln fundefs)
+         (typecheck-expr main ftenv fundefs))
+         (error "There is a static error in fundefs, but typechecker was not able to
                    detect it :("))]
     ))
 
@@ -450,7 +460,7 @@ representation BNF:
      (fundef (first fname-args)
               (map (lambda (entry) (parse-arg entry)) (rest fname-args))
               Any (parse body))]
-    
+    ;fname args type
     [(list 'define (? list? fname-args) ': type body)
      (fundef (first fname-args)
              (map (lambda (entry) (parse-arg entry)) (rest fname-args))
@@ -510,6 +520,10 @@ representation BNF:
 |#
 (define (parse-arg src)
   (match src
+  [(? symbol? x)
+   (arg x Any)]
+  [(? id? x)                  ; caso define f { x }
+   (arg x Any)]
   [(list x val)               ; caso with ... { id val} ... y define f { id } 
    (arg x Any)]
   [(list x ': t val)          ; caso with ... { id : type val } ...
