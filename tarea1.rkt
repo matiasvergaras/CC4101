@@ -37,7 +37,9 @@
 -- un identificador y un tipo opcional.
 |#
 (deftype Arg
-  (arg id type))
+  [aid id]
+  [arg id type]
+  [argcon id type cont])
 
 #| <type>:: = Num | Bool | Any
 -- representa el tipo de una expresión, argumento o función.
@@ -168,7 +170,7 @@ representation BNF:
 
               
   
-#| typecheck-expr: expr x tenv -> Type | error
+#| typecheck-expr: expr x tenv x list[Fundef] -> Type | error
 -- recibe una expresion, un ambiente de tipos
 -- y retorna el tipo de la expresion
 -- o error si es que corresp onde 
@@ -198,7 +200,7 @@ representation BNF:
     (let ([valid-list (map typecheck-pair argsvals)])
     (foldl (lambda (a b) (and a b)) #t argsvals)))
 
-  #| args-correspondance: list[args] list[expr] -> Bool | error
+  #| args-correspondance: list[Args] list[Expr] -> Bool | error
   -- recibe una lista de argumentos y una lista de expresiones
   -- devuelve true si el tipo de las exprs corresponde con el
   -- tipo del argumento.
@@ -254,7 +256,7 @@ representation BNF:
 
 
 #| typecheck-fun: Fundef -> Type | error
--- recibe una función y retorna su tipo
+-- recibe una definición de función y retorna su tipo
 -- o error si es que corresponde 
 |#
 (define (typecheck-fun afun)
@@ -280,13 +282,9 @@ representation BNF:
     [else
       (match (first dictlist)
         [(? arg? a)
-         (extend-tenv
-               a
-              (extend-tenv-list (rest dictlist) tenv))]
+         (extend-tenv a (extend-tenv-list (rest dictlist) tenv))]
         [(list (? arg? a))
-              (extend-tenv
-               a
-              (extend-tenv-list (rest dictlist) tenv))]
+         (extend-tenv a (extend-tenv-list (rest dictlist) tenv))]
         [list (extend-tenv (car (first dictlist))
                   (extend-tenv-list (rest dictlist) tenv))])]))
 
@@ -296,12 +294,39 @@ representation BNF:
 -- retorna el ambiente extendido con los tipos
 -- de los parámetros de las funciones.
 |#
-(define (extend-tenv-fun funs atenv)
-  (match funs
+(define (extend-tenv-fun fundefs atenv)
+  (match fundefs
     [empty mtTenv]
     [list (for-each (lambda (entry)
                       (extend-tenv-list (fundef-args entry atenv)))
-                      funs)]
+                      fundefs)]
+    ))
+
+#| typecheck-contracts: Tenv List[Fundef] -> Bool | error
+-- recibe un ambiente extendido con los argumentos de funciones
+-- y la lista de definiciones de funciones. Revisa que para los
+-- los argumentos con contrato la  funcion contrato cumpla con
+-- recibir exactamente un Arg Any y retornar Bool.
+-- Retorna true si se cumple para todos, false si no.
+|#
+(define (typecheck-contracts tenv fundefs)
+  (match tenv
+    [(aTenv ar rest)
+     (match ar
+       [(argcon id type cont)
+        (let([fcont (lookup-fundef cont fundefs)])
+          (if (equal? (typecheck-fun fcont) Bool)
+              (if (equal? (length (fundef-args fcont)) 1)
+                  (typecheck-contracts rest fundefs)
+                  (error (string-append "Static contract error: too many return values "
+                                        "for contract " fcont ". Expected 1, "
+                                        "found " (number->string (length (fundef-args fcont)))))
+                  )
+              (error (string-append "Static contract error: invalid type for " fcont )))
+          )]
+       [else (typecheck-contracts rest fundefs)]
+       )]
+    [mtTenv #t]
     ))
 
 #| typecheck-prog: Prog -> Type | error
@@ -317,6 +342,7 @@ representation BNF:
          (let([ftenv (
          (extend-tenv-fun fundefs mtTenv)
          )])
+         (typecheck-contracts ftenv fundefs)
          (typecheck-expr main ftenv fundefs))
          (error "There is a static error in fundefs, but typechecker was not able to
                    detect it :("))]
@@ -451,7 +477,7 @@ representation BNF:
 
 
 #| parse-fun: Src -> Fundef
--- genera una funcion (en sintaxis abstracta) a partir del parseo del src.
+-- genera una funcion (en sintaxis abstracta) a partir del parseo del src de una funcion.
 |#
 (define (parse-fun src)
   (match src
@@ -515,20 +541,24 @@ representation BNF:
 
 #| parse-arg: Src -> Arg
 -- convierte sintaxis concreta en sintaxis abstracta
--- del tipo argumento (arg)
+-- del tipo argumento 
 |#
 (define (parse-arg src)
   (match src
   [(? symbol? x)
    (arg x Any)]
-  [(? id? x)                  ; caso define f { x }
+  [(? id? x)                  ; caso define { f { x } }
    (arg x Any)]
   [(list x val)               ; caso with ... { id val} ... y define f { id } 
    (arg x Any)]
   [(list x ': t val)          ; caso with ... { id : type val } ...
    (arg x (parse-type t))]
-  [(list x ': t)              ; caso define f { id : type }
+  [(list x ': t)              ; caso define { f { id : type } }
    (arg x (parse-type t))]
+  [(list x '@ cont)           ; caso define { f { id @ contract } }
+   (argcon x Any cont)]
+  [(list x ': t '@ cont)      ; caso define { f { id : type @ contract } }
+   (argcon x (parse-type t) cont)]
   ))
 
 
