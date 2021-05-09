@@ -166,50 +166,7 @@ representation BNF:
     [else (if (bool-op-check Bool tl tr) (get-predominant-type tl tr) (error stbooleannumber))];lambdas && ||
     ))))        
 
-
-#| check-pair: (cons arg expr) -> true | error
--- revisa si un par (argumento, valor) esta bien tipado.
--- retorna true en caso correcto, error en caso contrario.
-|#
-(define (typecheck-pair argval tenv fundefs)
-  (let([targ (arg-type (car argval))])
-  (let([tval (typecheck-expr (car (cdr argval)) tenv fundefs)])
-  (if  (or (equal? targ tval)
-            (equal? targ Any))
-         #t
-         (error (string-append "Static type error: expected " (string-type targ)
-                            " found "(string-type tval)))))))
-
-
-#| typecheck-arg: list((arg, expr)) -> Bool | error
--- realiza el chequeo de tipos para una lista de pares (argumento, expr)
--- si todas las expresiones calzan con el tipo declarado para su argumento,
--- retorna true. En caso contrario, false.
-|#
-(define (typecheck-arg argsvals tenv fundefs)
-  (let ([valid-list (map typecheck-pair argsvals tenv fundefs)])
-  (foldl (lambda (a b) (and a b)) #t argsvals)))
-
-#| args-correspondance: list[args] list[expr] -> Bool | error
--- recibe una lista de argumentos y una lista de expresiones
--- devuelve true si el tipo de las exprs corresponde con el
--- tipo del argumento.
-|#
-(define (args-correspondance args exprs tenv fundefs)
-  (cond
-    [(and (empty? args) (not (empty? exprs))) (error "Static type error: not enough arguments")]
-    [(and (not (empty? exprs)) (empty? args)) (error "Static type error: too many arguments")]
-    [(and (empty? args) (empty? exprs)) #t]
-    [else
-     (let ([texp (typecheck-expr (car exprs tenv fundefs))])
-       (let ([targ (arg-type (car args))])
-     (if (or (equal? texp targ)(equal? targ Any))
-              (args-correspondance (cdr args) (cdr exprs) tenv fundefs)
-              (error (string-append "Static type error: expected " (string-type targ)
-                     " found " (string-type texp))))
-              ))
-     ]))
-                          
+              
   
 #| typecheck-expr: expr x tenv -> Type | error
 -- recibe una expresion, un ambiente de tipos
@@ -217,6 +174,50 @@ representation BNF:
 -- o error si es que corresp onde 
 |#
 (define (typecheck-expr expr [tenv mtTenv] [fundefs '()])
+
+  #| check-pair: (cons arg expr) -> true | error
+  -- revisa si un par (argumento, valor) esta bien tipado.
+  -- retorna true en caso correcto, error en caso contrario.
+  |#
+  (define (typecheck-pair argval)
+    (let([targ (arg-type (car argval))])
+    (let([tval (typecheck-expr (car (cdr argval)) tenv fundefs)])
+    (if  (or (equal? targ tval)
+              (equal? targ Any))
+           #t
+           (error (string-append "Static type error: expected " (string-type targ)
+                              " found "(string-type tval)))))))
+
+
+  #| typecheck-arg: list((arg, expr)) -> Bool | error
+  -- realiza el chequeo de tipos para una lista de pares (argumento, expr)
+  -- si todas las expresiones calzan con el tipo declarado para su argumento,
+  -- retorna true. En caso contrario, false.
+  |#
+  (define (typecheck-arg argsvals)
+    (let ([valid-list (map typecheck-pair argsvals)])
+    (foldl (lambda (a b) (and a b)) #t argsvals)))
+
+  #| args-correspondance: list[args] list[expr] -> Bool | error
+  -- recibe una lista de argumentos y una lista de expresiones
+  -- devuelve true si el tipo de las exprs corresponde con el
+  -- tipo del argumento.
+  |#
+  (define (args-correspondance args exprs)
+    (cond
+      [(and (empty? args) (not (empty? exprs))) (error "Static type error: not enough arguments")]
+      [(and (not (empty? exprs)) (empty? args)) (error "Static type error: too many arguments")]
+      [(and (empty? args) (empty? exprs)) #t]
+      [else
+       (let ([texp (typecheck-expr (car exprs) tenv fundefs)])
+         (let ([targ (arg-type (car args))])
+       (if (or (equal? texp targ)(or (equal? targ Any) (equal? texp Any)))
+                (args-correspondance (cdr args) (cdr exprs))
+                (error (string-append "Static type error: expected " (string-type targ)
+                       " found " (string-type texp))))
+                ))
+       ]))
+  
   (match expr
     [(id z) (tenv-lookup z tenv)] 
     [(num n) Num]
@@ -236,7 +237,7 @@ representation BNF:
                                    " found "(string-type tfalse))))
          (error (string-append "Static type error: expected Bool found " (string-type tcond)))))))]
     [(with argsvals body)
-     (if (typecheck-arg argsvals tenv fundefs)
+     (if (typecheck-arg argsvals)
          (typecheck-expr body (extend-tenv-list argsvals tenv) fundefs)
          (error "Static type error in with. Unable to specify it.")) ; Debería haberse alertado antes.
      ]
@@ -244,7 +245,7 @@ representation BNF:
      (let([fun (lookup-fundef fid fundefs)])
      (let([funargs (fundef-args fun)])
        (if (equal? (length args) (length funargs))
-           (if (args-correspondance funargs args tenv fundefs)
+           (if (args-correspondance funargs args)
                (fundef-type fun)
                (error "Static type error in app. Unable to specify it."))
            (error (string-append "Static type error: arity mismatch - expected " (number->string (length funargs))
@@ -316,8 +317,6 @@ representation BNF:
          (let([ftenv (
          (extend-tenv-fun fundefs mtTenv)
          )])
-         (displayln "just to be sure")
-         (displayln fundefs)
          (typecheck-expr main ftenv fundefs))
          (error "There is a static error in fundefs, but typechecker was not able to
                    detect it :("))]
