@@ -4,13 +4,12 @@
 #| CC4101: Lenguajes de Programación
 -- Tarea 1 Semestre Otoño 2021 (2021-1)
 -- Alumno: Matías Vergara Silva
--- Script: tests pregunta 1: Tipos estáticos
+-- Script: tests pregunta 2: Tipos dinámicos
 |#
 
 #| ======= TAREA 1: LENGUAJE CON FUNCIONES DE PRIMER ORDEN =======|#
 #| -------  Tipos estáticos, tipos opcionales, contratos   -------|#
-#| --------------  Test parte 1: Chequeo dinámico   --------------|#
-
+#| --------------  Test parte 2: Tipos estáticos    --------------|#
 
 
 #|------------------   Tests del enunciado  -----------------|#
@@ -47,7 +46,7 @@
 
 
 #|------------------   Tests personalizados   -----------------|#
-;-- usaremos los mismos tests de la P1, pero variando la declaracion
+;-- usaremos los mismos tests de la P1, pero variando la declaraciont
 ;-- de tipos.
 
 
@@ -133,11 +132,29 @@
 ;Buen comportamiento del typechecker con casos simples
 (test/exn (typecheck '{{|| 1 #t}}) "Static type error: expected Bool found Num")
 
+;para revisar que una definicion de funcion no sobreescriba a la otra
+(test (run '{{define {double {x : Num}} {+ x x}}
+         {define {triple {x : Num}}
+           {+ {+ x x} x}}
+ {double 25}} '() #t) 50)
+
+; lo mismo pero en el orden inverso (la funcion buscada es la ultima en
+; guardar x)
+(test (run '{{define {double {x : Num}} {+ x x}}
+         {define {triple {x : Num}}
+           {+ {+ x x} x}}
+ {triple 25}} '() #f) 75)
+
 ;with en el cual se asigna x Any y se usa en &&.
 ;Typechecker debe respetar tipo estricto del operador (Bool).
 (test (typecheck
        '{{with {{x : Any #t} {y : Any #f}}
          {&& x y}}}) 'Bool)
+
+;mismo ejemplo anterior pero con || en lugar de &&
+(test (typecheck
+       '{{with {{x : Any #t} {y : Any #f}}
+         {|| x y}}}) 'Bool)
 
 ;with en el cual se reestablece el tipo y valor de x.
 ;El tipo entregado debe concordar con el x de mas a la izqda.
@@ -182,10 +199,11 @@
 
 
 ;with con expresiones recursivas y operacion en condicion
-(test (run '{ 
+;las ramas del if tienen tipo distinto (Bool y Num). Debe fallar en tipeo.
+(test/exn (run '{ 
    {with {{x : Num {+ 1 2}} {y : Any {! #f}} {z : Num {* 0 5}} {w : Any {/ 3 6}}}
          {if (! y) (> (+ x z) x) {* z z}}}
-   } '() #f) 0)
+   } '() #t) "Static type error: expected Bool found Num")
 
 ;mismo ejemplo, pero generando un error en la definición recursiva
 ;de y con respecto al tipo declarado
@@ -209,47 +227,69 @@
    {define {not x} {! x}}
    {with {{x {triple 2}} {y {! {> 2 {triple 1}}}} }
          {if y x 0}}
-   } '() #f) 6)
+   } '() #t) 6)
+(test (typecheck '{                
+   {define {triple x} {* 3 x}}
+   {define {not x} {! x}}
+   {with {{x {triple 2}} {y {! {> 2 {triple 1}}}} }
+         {if y x 0}}
+   }) 'Any)
 
+;mismo programa pero ahora declarando los tipos para lograr que
+;typecheck no devuelva Any si no Num
+(test (typecheck '{                
+   {define {triple {x : Num}} : Num {* 3 x}}
+   {define {not {x : Bool}} : Bool {! x}}
+   {with {{x : Num {triple 2}} {y : Bool {! {> 2 {triple 1}}}} }
+         {if y x 0}}
+   }) 'Num)
 
 ;with que usa una funcion booleana como expresion de un valor y
-;expresiones recursivas en la definicion de funciones
+;expresiones recursivas en la definicion de funciones.
 (test (run '{
    {define {same {x : Num} {y : Num}} {= x y}}
-   {define {nand {x : Any} {y : Any}} {&& {! x}{! y}}}
-   {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
-         {if w (same x y) (nand x y)}}
+   {define {nand {x : Any} {y : Any}} {! (&& x y)}}
+   {with {{x #t} {y #t} {z #t} {w (nand #f #t)}}
+         {if w (same 1 2) (nand x y)}}
    } '() #t) #f)
+
 (test (typecheck '{
    {define {same {x : Num} {y : Num}} {= x y}}
-   {define {nand {x : Any} {y : Any}} {&& {! x}{! y}}}
-   {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
+   {define {nand {x : Any} {y : Any}} {! (&& x y)}}
+   {with {{x #t} {y #t} {z #t} {w (nand #f #t)}}
          {if w (same x y) (nand x y)}}
    }) 'Any)
 
-;mismo ejemplo anterior, pero declaramos tipo de same y nand como Num
-;lo cual es inconsistente (cuerpo es Bool, funcion es Num)
+
+
+
+;mismo ejemplo anterior, sin problemas en declaracion de same y nand,
+;pero pasando numeros en x e y. Debe caerse en runtime por la aplicación de nand,
+;que forzaremos aplicando ! a w (para obtener #t en la condicion del if).
 (test/exn (run '{
-   {define {same {x : Num} {y : Num}} : Num {= x y}}
-   {define {nand {x : Any} {y : Any}} : Num {&& {! x}{! y}}}
+   {define {same {x : Num} {y : Num}} : Any {= x y}}
+   {define {nand {x : Any} {y : Any}} : Any {! (&& x y)}}
    {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
-         {if w (same x y) (nand x y)}}
-   } '() #t) "Static type error: expected Bool found Num")
+         {if (! w) (same x y) (nand x y)}}
+   } '() #t) "Runtime type error: expected Boolean found Number")
 
 
-;mismo ejemplo anterior, pero declaramos tipo de same y nand como Any
-;por lo cual run debe retornar y typecheck debe dar 'Any
+
+
+;mismo ejemplo anterior, sin error de tipos en x e y,
+;y declarando tipo de same y nand como Any para que
+;run retorne y typecheck arroje 'Any
 (test (run '{
    {define {same {x : Num} {y : Num}} : Any {= x y}}
-   {define {nand {x : Any} {y : Any}} : Any {&& {! x}{! y}}}
-   {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
-         {if w (same x y) (nand x y)}}
+   {define {nand {x : Any} {y : Any}} : Any {! (&& x y)}}
+   {with {{x #t} {y #t} {z #t} {w (nand #t #t)}}
+         {if w (same x y) #f}}
    } '() #t) #f)
 
 (test (typecheck '{
    {define {same {x : Num} {y : Num}} : Any {= x y}}
-   {define {nand {x : Any} {y : Any}} : Any {&& {! x}{! y}}}
-   {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
+   {define {nand {x : Any} {y : Any}} : Any  {! (&& x y)}}
+   {with {{x #t} {y #t} {z #t} {w (nand #f #t)}}
          {if w (same x y) (nand x y)}}
    })  'Any)
 
@@ -257,18 +297,17 @@
 ;(consistente con el cuerpo, debe incidir retorno de typecheck)
 (test (run '{
    {define {same {x : Num} {y : Num}} : Bool {= x y}}
-   {define {nand {x : Any} {y : Any}} : Bool {&& {! x}{! y}}}
-   {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
+   {define {nand {x : Any} {y : Any}} : Bool  {! (&& x y)}}
+   {with {{x 1} {y 1} {z #t} {w (nand #f #t)}}
          {if w (same x y) (nand x y)}}
-   } '() #t) #f)
+   } '() #t) #t)
 
 (test (typecheck '{
    {define {same {x : Num} {y : Num}} : Bool {= x y}}
-   {define {nand {x : Any} {y : Any}} : Bool {&& {! x}{! y}}}
+   {define {nand {x : Any} {y : Any}} : Bool  {! (&& x y)}}
    {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
          {if w (same x y) (nand x y)}}
    }) 'Bool)
-
 
 
 ;aplicacion anidada de funciones con multiples argumentos
@@ -287,14 +326,77 @@
    ) 'Num)
 
 ;funcion recursiva, definida en base a if.
-;run con typecheck desactivado la ejecuta sin problemas...
 (test (run '{
    {define {sub1until0 (x : Any)} : Num {if (= x 0) x (sub1until0 (sub1 x))}}
-     {sub1until0 5}} '() #f) 0)
-;...Pero si activamos el typecheck, el programa no tipa. Esto debido a que
-;en el typecheck, se revisa que el tipo del cuerpo de una función coincida con el
-;tipo declarado para esta, y como en este caso se trata de la misma función,
-;el comportamiento esperado es que no encuentre la definición. 
-(test/exn (typecheck  '{
+     {sub1until0 5}} '() #t) 0)
+
+(test (typecheck  '{
    {define {sub1until0 (x : Any)} : Num {if (= x 0) x (sub1until0 (sub1 x))}}
-     {sub1until0 5}}) "Static error: undefined function")
+     {sub1until0 5}}) 'Num)
+
+
+;funciones definidas + with + tipos errados en la definición de funciones
+;con respecto al tipo del cuerpo de las mismas
+(test/exn (run '{
+   {define {same {x : Num} {y : Num}} : Num {= x y}}
+   {define {nand {x : Any} {y : Any}} : Num {! (&& x y)}}
+   {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
+         {if w (same x y) (nand x y)}}
+   } '() #t) "Static type error: expected Bool found Num")
+
+
+;|========================================================================|
+;| EJEMPLO FINAL DE LA PARTE 1 - ahora con chequeo estático               |
+;| En la P1, el problema a continuación se caia en tiempo de ejecución.   |
+;| Ahora veremos como debería expresarse para que el problema se detecte  |
+;| en tiempo estático.                                                    |
+;|========================================================================|
+
+
+;funciones definidas + with + tipos correctos en la definición de funciones
+;con respecto al tipo del cuerpo de las mismas, pero mantiene error en
+;aplicacion de nand
+(test (run '{
+   {define {same {x : Num} {y : Num}} : Bool {= x y}}
+   {define {nand {x : Any} {y : Any}} : Bool {! (&& x y)}}
+   {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
+         {if w (same x y) (nand x y)}}
+   } '() #t) #f)
+
+;|========================================================================|
+;| En el ejemplo anterior, todo sigue funcionando porque x e y se definen |
+;| como Any en la definición de nand, por lo que tipea. Y como el if no   |
+;| cae en ese caso, no genera error de ejecución.                         |
+;|========================================================================|
+
+
+;funciones definidas + with + tipos correctos en la definición de funciones
+;con respecto al tipo del cuerpo de las mismas, manteniendo error en app
+;de nand, pero indicando los tipos de x e y como Bool en la definición de nand,
+;mas no en el with. Forzando a que caiga en la mala rama del if.
+(test/exn (run '{
+   {define {same {x : Num} {y : Num}} : Bool {= x y}}
+   {define {nand {x : Bool} {y : Bool}} : Bool {! (&& x y)}}
+   {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
+         {if (! w) (same x y) (nand x y)}}
+   } '() #t) "Runtime type error: expected Boolean found Number" )
+
+;|========================================================================|
+;| Se sigue cayendo en runtime mas no en static, porque no declaramos el  |
+;| tipo de x e y en el with.                                              |
+;|========================================================================|
+
+;funciones definidas + with + tipos correctos en la definición de funciones
+;con respecto al tipo del cuerpo de las mismas, manteniendo error en app
+;de nand, pero indicando los tipos de x e y como Bool en la definición de nand,
+;y también en el with
+(test/exn (run '{
+   {define {same {x : Num} {y : Num}} : Bool {= x y}}
+   {define {nand {x : Bool} {y : Bool}} : Bool {! (&& x y)}}
+   {with {{x : Num 1} {y : Num 2} {z #t} {w (nand #f #t)}}
+         {if w (same x y) (nand x y)}}
+   } '() #t) "Static type error: expected Bool found Num")
+
+;|========================================================================|
+;| Finalmente, el typechecker atrapó el error antes de la ejecución :)    |
+;|========================================================================|

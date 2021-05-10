@@ -14,6 +14,8 @@
 |#
 ; Error de runtime: booleano por numero
 (define rtnumberboolean "Runtime type error: expected Number found Boolean")
+; Error de runtime: numero por booleano
+(define rtbooleannumber "Runtime type error: expected Boolean found Number")
 ; Error estatico: numero por booleano
 (define stbooleannumber "Static type error: expected Bool found Num")
 ; Error estatico: booleano por numero
@@ -26,6 +28,7 @@
 (deftype Prog
   (prog fundefs main))
 
+
   
 #| <fundef> ::= {define {<id> <arg>*}[: <type>] <expr>}
 -- funciones de n argumentos y cuerpo, con declaracion
@@ -34,9 +37,10 @@
 (deftype FunDef
   (fundef fname args type body))
 
-#| <arg> ::= <id> | {<id> : <type>}
+#| <arg> ::= <id> | {<id> : <type>}| <id> : <type> @ <contract>
 -- representa un argumento de funcion:
 -- un identificador y un tipo opcional.
+-- P3: y un contrato opcional.
 |#
 (deftype Arg
   [aid id]
@@ -185,9 +189,7 @@ representation BNF:
     [(equal? op *) (if (bool-op-check Num tl tr) Num (error stnumberboolean))]
     [(equal? op >) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
     [(equal? op <) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
-    [(equal? op <=) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
-    [(equal? op >=) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
-    [else (if (bool-op-check Bool tl tr) Bool (error stbooleannumber))];lambdas && ||
+    [else (if (bool-op-check Bool tl tr) Bool (error stbooleannumber))];lambda &&
     ))))        
 
               
@@ -199,7 +201,7 @@ representation BNF:
 |#
 (define (typecheck-expr expr [tenv mtTenv] [fundefs '()])
 
-  #| check-pair: (cons arg expr) -> true | error
+  #| typecheck-pair: (cons arg expr) -> true | error
   -- revisa si un par (argumento, valor) esta bien tipado.
   -- retorna true en caso correcto, error en caso contrario.
   |#
@@ -277,15 +279,16 @@ representation BNF:
    ))
 
 
-#| typecheck-fun: Fundef -> Type | error
--- recibe una definición de función y retorna su tipo
--- o error si es que el tipo del body no coincide con
--- el tipo declarado para la función
+#| typecheck-fun: Fundef List[Fundef] -> Type | error
+-- Recibe una definición de función y una lista de fundefs.
+-- Retorna el tipo de la función (que puede estar definida en base
+-- a alguna otra función en la lista de fundefs) o error si es que
+-- el tipo del body no coincide con el tipo declarado para la función
 |#
-(define (typecheck-fun afun)
+(define (typecheck-fun afun fundefs)
   (let([tfun (fundef-type afun)])
   (let([tbody (typecheck-expr (fundef-body afun)
-                              (extend-tenv-list (fundef-args afun) mtTenv))])
+                              (extend-tenv-list (fundef-args afun) mtTenv)fundefs)])
   (if (equal? tfun tbody)
       (dsp-type tfun)
       (if (equal? tbody Any)
@@ -337,7 +340,7 @@ representation BNF:
      (match ar
        [(? argcon? a)
         (let([fcont (lookup-fundef (argcon-cont a) fundefs)])
-          (if (equal? (parse-type (typecheck-fun fcont)) Bool)
+          (if (equal? (parse-type (typecheck-fun fcont fundefs)) Bool)
               (if (equal? (length (fundef-args fcont)) 1)
                   (typecheck-contracts rest fundefs)
                   (error (string-append "Static contract error: invalid type for "
@@ -355,17 +358,17 @@ representation BNF:
 -- recibe un programa y retorna su tipo
 -- o error si es que corresponde 
 |#
-(define (typecheck-prog aprog)
+(define (typecheck-prog aprog fundefs)
   (match aprog
     [(prog '() main)
-     (typecheck-expr main mtTenv)]
-    [(prog fundefs main)
-     (if (map typecheck-fun fundefs)
+     (typecheck-expr main mtTenv fundefs)]
+    [(prog funs main)
+     (if (map (lambda (entry) (typecheck-fun entry (append fundefs funs))) (append fundefs funs))
          (let([ftenv 
-         (extend-tenv-fun fundefs mtTenv)
+         (extend-tenv-fun funs mtTenv)
          ])
-         (typecheck-contracts ftenv fundefs)
-         (typecheck-expr main ftenv fundefs))
+         (typecheck-contracts ftenv (append fundefs funs))
+         (typecheck-expr main ftenv (append fundefs funs)))
          (error "There is a static error in fundefs, but typechecker was not able to
                    detect it :("))]
     ))
@@ -377,7 +380,7 @@ representation BNF:
 -- o error si es que corresponde 
 |#
 (define (typecheck src)
-  (dsp-type(typecheck-prog (parse-prog src)))
+  (dsp-type(typecheck-prog (parse-prog src) '()))
   )
 
   
@@ -405,7 +408,7 @@ representation BNF:
   [app fid args]
   )       
 
-#| <in-list>:: a x List[any] -> boolean
+#| <in-list>:: Any x List[Any] -> boolean
 -- indica si el valor dado como primer parametro
 -- esta presente en la lista dada como segundo
 |#
@@ -420,44 +423,44 @@ representation BNF:
 |#
 (define unops (list '! 'add1 'sub1))
 
-#| not-bool-unop? ::= add1 | sub1
--- operadores unarios que no son booleanos
+#| unop-over-nums ::= add1 | sub1
+-- operadores unarios que toman numeros como parametros
 |#
-(define not-bool-unops(list 'add1 'sub1))
+(define unops-over-nums (list add1 sub1))
 
 #| is-unop? ::= Procedure -> boolean
 -- verifica si un operador dado está en la lista de unops.
 |#
 (define (is-unop? x) (member x unops))
 
-#| is-not-bool-unop? ::= symbol -> boolean
+#| is-unop-over-nums? ::= symbol -> boolean
 -- verifica si un operador dado en sintaxis concreta
--- no está en la lista de unops booleanos.
+-- está en la lista de unops que reciben nums.
 |#
-(define (is-not-bool-unop? x) (in-list x not-bool-unops))
+(define (is-unop-over-nums? x) (in-list x unops-over-nums))
 
 #| <binops> ::= + | - | * | / | && | || / = | < | ...
 -- lista de operadores que toman dos valores como parámetros.
 |#
-(define binops (list '+ '- '* '/ '&& '|| '= '> '< '>= '<=))
+(define binops (list '+ '- '* '/ '&& '|| '= '> '<))
 
-#| not-bool-binops? ::= + | - | / | > | < | >= | <=
--- operadores binarios que no son booleanos
+#| binops-over-nums? ::= + | - | / | > | < 
+-- operadores binarios que toman dos numeros como parametros
 |#
-(define not-bool-binops (list '+ '- '* '/ '> '< '>= '<= '=))
+(define binops-over-nums (list '+ '- '* '/ '> '=))
 
-#| is-binop? ::= Procedure -> boolean
+#| is-binop? ::= Procedure -> Boolean
 -- verifica si un operador dado está en la lista de binops.
 |#
 (define (is-binop? x) (member x binops))
 
-#| is-not-bool-binop? ::= Symbol -> boolean
+#| is-binop-over-nums? ::= Symbol -> Boolean
 -- verifica si un operador dado en sintaxis concreta
--- no está en la lista de binops booleanos.
+-- está en la lista de binops que reciben numeros.
 |#
-(define (is-not-bool-binop? x) (in-list x not-bool-binops))
+(define (is-binop-over-nums? x) (in-list x binops-over-nums))
 
-#| lookup-fundef: Id List[FunDef] -> FunDef o error
+#| lookup-fundef: id List[FunDef] -> FunDef o error
 -- busca la funcion de nombre fname en la lista fundefs y la retorna
 -- si es que la encuentra, o error en caso contrario
 |#
@@ -468,7 +471,7 @@ representation BNF:
                        fd
                        (lookup-fundef fname fds))]))
 
-#| parse-binop: symbol -> procedure
+#| parse-binop: symbol -> Procedure
 -- realiza el match entre el simbolo de un operador
 -- binario y el operador correspondiente
 |#
@@ -479,15 +482,13 @@ representation BNF:
     ['* *]
     ['/ /]
     ['= equal?]
-    ['&& (lambda (x y) (and x y))]
-    ['|| (lambda (x y) (or x y))]
     ['> >]
-    ['>= >=]
     ['< <]
-    ['<= <=]))
+    ['&& (lambda (x y) (and x y))]
+    ['|| (lambda (x y) (or x y))]))
 
 
-#| parse-unop: symbol -> procedure
+#| parse-unop: symbol -> Procedure
 -- realiza el match entre el simbolo de un operador
 -- unario y el operador correspondiente
 |#
@@ -529,7 +530,7 @@ representation BNF:
       (prog (map (lambda (entry) (parse-fun entry)) fundefs) (parse main))]))
 
 
-#| interp-prog: Prog -> number|boolean|error
+#| interp-prog: Prog x List[Fundef] x Env -> Number|Boolean|error
 -- interpreta un programa, recuperando las definiciones de funciones
 -- y el main, para entregarlos como argumentos al interprete de
 -- expresiones (expr).
@@ -610,7 +611,27 @@ representation BNF:
          (env-lookup x rest))]))
 
 
-#| interp :: Expr x List[FunDef] x Env -> number|boolean o error
+#| unparse-op :: unop|binop -> src
+-- realiza la conversion de sintaxis abstracta a sintaxis concreta
+-- para un operador unario o binario.
+|#
+(define (unparse-op op)
+(match op
+  [= '=]
+  [+ '+]
+  [- '-]
+  [* '*]
+  [/ '/]
+  [> '>]
+  [< '<]
+  [not '!]
+  [add1 'add1]
+  [sub1 'sub1]
+  ))
+
+(define unparseable-op (list + - * / > < add1 sub1 not equal?))
+
+#| interp :: Expr x List[FunDef] x Env -> Number|Boolean o error
 -- evalua expresiones aritméticas y booleanas
 |#
 (define (interp expr fundefs env)
@@ -620,32 +641,37 @@ representation BNF:
   -- operador puede operar, y en dicho caso, los opera.
   |#
   (define (interp-binop op l r)
-    (if (and (number? l) (number? r))
-        (op l r)
-        (if (and (boolean? l) (boolean? r))
-            (if (not (is-not-bool-binop? op))
+    (if (in-list op unparseable-op)
+        (if (is-binop-over-nums? (unparse-op op))
+            (if (and (number? l)(number? r))
                 (op l r)
-                (error rtnumberboolean)
-                )
-            (error rtnumberboolean)
-            )
-        )
+                (error rtnumberboolean))
+            (if (and (boolean? l)(boolean? r))
+                (op l r)
+                (error rtbooleannumber)))
+        (if (and (boolean? l)(boolean? r))
+            (op l r)
+            (error rtbooleannumber)))
     )
+  
 
-  #| interp-unop :: Expr x number|boolean -> number|boolean o error
+  #| interp-unop :: Expr x number|boolean -> Number|Boolean o error
   -- verifica que lo resultados de interpretar los operandos de un
   -- operador unario correspondan a los tipos que dicho operador puede operar
   -- y en dicho caso, los opera.
   |#
   (define (interp-unop op param)
-    (if (number? param)
-        (op param)
-        (if (not (is-not-bool-unop? op))
+    (if (is-unop-over-nums?  op)
+        (if (number? param)
             (op param)
-            (error rtnumberboolean)
+            (error rtnumberboolean))
+        (if (boolean? param)
+            (op param)
+            (error rtbooleannumber)
             )
         )
     )
+  
   #| extend-env-list :: List[Pair[symbol, expr]] x Env -> Env
   -- extiende el ambiente dado con los pares (identificador, expr)
   -- de la lista entregada como parametro, interpretando las expr.
@@ -675,7 +701,7 @@ representation BNF:
                     ( interp (first es) fundefs env )
                     (app-map-list (rest args) (rest es)))]))
 
-  #| verify-contracts :: List[Arg] List[Expr] -> boolean | error
+  #| verify-contracts :: List[Arg] x List[Expr] -> Boolean | error
   -- recibe una lista de argumentos y las expresiones correspondientes a ellos
   -- y verifica que cumplan el contrato especificado (si es que aplica).
   -- Retorna true en dicho caso, error en caso contrario.
@@ -683,7 +709,7 @@ representation BNF:
   (define (verify-contracts args exps)
     (match args
       ['() #t]
-      [(list (? argcon? ac) restargs)
+      [(list (? argcon? ac) restargs ...)
        (let([contract (lookup-fundef (argcon-cont ac) fundefs)])
          (let([val (interp (app (fundef-fname contract) (list (first exps))) fundefs env)])
          (if val
@@ -724,44 +750,8 @@ representation BNF:
   (let([parsed-prog (parse-prog prog)])
   (define parsed-prog (parse-prog prog))
   (if use-typecheck
-    (if (typecheck-prog parsed-prog)
+    (if (typecheck-prog parsed-prog fundefs)
         (interp-prog parsed-prog fundefs empty-env)
         (error "Typecheck failed, but it didnt report any specific error :("))
     
         (interp-prog parsed-prog fundefs empty-env))))
-
-
-
-(test/exn (run '{{define {positive x} : Any {> x 0}}
- {define {div {z : Num @ positive} y}
-           {/ y -1}}
- {div -1 3}})
-  "Static contract error: invalid type for positive")
-
-
-; ================== TESTS PERSONALIZADOS =================
-;P3 - multiples argumentos en funcion contrato
-(test/exn (run '{{define {positive x y} : Bool {> x 0}}
- {define {div {z : Num @ positive} y}
-           {/ y -1}}{div -1 3}} '() #t )
- "Static contract error: invalid type for positive")
-
-; para revisar que una definicion de funcion no sobreescriba a la otra
-(test (run '{{define {double {x : Num}} {+ x x}}
-         {define {triple {x : Num}}
-           {+ {+ x x} x}}
- {double 25}} '() #t) 50)
-
-; lo mismo pero en el orden inverso (la funcion buscada es la ultima en
-; guardar x)
-(test (run '{{define {double {x : Num}} {+ x x}}
-         {define {triple {x : Num}}
-           {+ {+ x x} x}}
- {triple 25}} '() #f) 75)
-
-;P3 - no cumplir con contrato
-(test/exn (run '{{define {positive x} : Bool {> x 0}}
- {define {div {x : Num @ positive} y}
-           {/ x y}}{div -1 3}} '() #f) 
-  "Runtime contract error: -1 does not satisfy positive")
- 

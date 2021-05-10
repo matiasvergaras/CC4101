@@ -9,6 +9,8 @@
 
 #| ======= TAREA 1: LENGUAJE CON FUNCIONES DE PRIMER ORDEN =======|#
 #| -------  Tipos estáticos, tipos opcionales, contratos   -------|#
+#| --------------  Test parte 2: Chequeo dinámico   --------------|#
+
 
 #|------------------   Tests del enunciado   -----------------|#
 
@@ -51,28 +53,47 @@
 ;Programa con error de tipos en un operador. Debe caerse en runtime.
 (test/exn (run '{
   {define {badsum x y} {+ (! x) y}}
-  {badsum 1 2}} '() #f )"Runtime type error: expected Number found Boolean")
+  {badsum 1 2}} '() #f )"Runtime type error: expected Boolean found Number")
 
 ;Lo mismo, pero con tipos declarados. No deben tener efecto.
 (test/exn (run '{
   {define {badsum {x : Any} {y : Num}} : Num {+ (! x) y}}
-  {badsum 1 2}} '() #f )"Runtime type error: expected Number found Boolean")
+  {badsum 1 2}} '() #f )"Runtime type error: expected Boolean found Number")
 
 #| Confiaremos en que los tests anteriores demuestran que el typechecker
 -- no nos molestará, y entraremos a testear las funcionalidades de la P1.
 |#
 
-;Buen comportamiento con casos simples
-(test/exn (run '{{+ 1 #f}} '() #f) "Runtime type error")
-
-;Buen comportamiento con casos simples
-(test (run '{{+ 1 2}} '() #f) 3)
-
-;Buen comportamiento con casos simples
+;Buen comportamiento con casos simples: un solo numero
 (test (run '{3} '() #f) 3)
 
-;Buen comportamiento con casos simples
+;Buen comportamiento con casos simples: un solo boolean
 (test (run '{#f} '() #f) #f)
+
+;Buen comportamiento con casos simples: operacion binaria ilegal
+(test/exn (run '{{+ 1 #f}} '() #f) "Runtime type error: expected Number found Boolean")
+
+;Buen comportamiento con casos simples: operador +
+(test (run '{{+ 1 2}} '() #f) 3) ;asumimos buen comportamiento para -, *, /
+(test/exn (run '{{+ #t #t}} '() #f) "Runtime type error: expected Number found Boolean")
+
+
+
+;Buen comportamiento con casos simples: operador >
+(test (run '{{> 3 3}} '() #f) #f)
+(test (run '{{> 3 2}} '() #f) #t)
+
+;Buen comportamiento con casos simples: operador <
+(test (run '{{< 3 3}} '() #f) #f)
+(test (run '{{< 3 4}} '() #f) #t)
+
+;Buen comportamiento con casos simples: operador &&
+(test (run '{{< 3 3}} '() #f) #f)
+(test (run '{{< 3 4}} '() #f) #t)
+
+;Buen comportamiento con casos simples: operador <
+(test (run '{{< 3 3}} '() #f) #f)
+(test (run '{{< 3 4}} '() #f) #t)
 
 ;with en el cual se reestablece el valor de x.
 ;Debe entregar el primero de izqda a der.
@@ -105,15 +126,15 @@
 ;expresiones anidada en la definicion de funciones
 (test (run '{
    {define {same x y} {= x y}}
-   {define {nand x y} {&& {! x}{! y}}}
-   {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
-         {if w (same x y) (+ x y)}}
-   } '() #f) 3) 
+   {define {first-quadrant x y} {&& {> x 0}{> y 0}}}
+   {with {{x 1} {y 2} {w (first-quadrant 1 -1)}}
+         {if w (same x y) (first-quadrant x y)}}
+   } '() #f) #t) 
 
 ;mismo test, cambiando nand por nor (para probar || y =)
 (test (run '{
    {define {same x y} {= x y}}
-   {define {nand x y} {|| {! x}{! y}}}
+   {define {nand x y}  {! (&& x y)}}
    {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
          {if w (same x y) (+ x y)}}
    } '() #f) #f)
@@ -121,20 +142,18 @@
 ;mismo test, forzando error: operador = entre num y bool
 (test/exn (run '{
    {define {same x y} {= x y}}
-   {define {nand x y} {|| {! x}{! y}}}
+   {define {nand x y} {! (&& x y)}}
    {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
-         {if w (same #t y) (+ x y)}}
+         {if w (same #t y) (nand x y)}}
    } '() #f) "Runtime type error: expected Number found Boolean")
 
-;mismo test, forzando error: operador && entre num y bool
-;esto no se cae en esta parte ya que racket acepta el and
-;entre num y bool.
-(test (run '{
+;mismo test, forzando error: operador || entre numeros (nand 1 2)
+(test/exn (run '{
    {define {same x y} {= x y}}
-   {define {nand x y} {|| {! x}{! y}}}
+   {define {nand x y} {! (&& x y)}}
    {with {{x 1} {y 2} {z #t} {w (nand 1 2)}}
          {if w (same x y) (+ x y)}}
-   } '() #f) 3)
+   } '() #f) "Runtime type error: expected Boolean found Number")
 
 ;aplicacion anidada de funciones con multiples argumentos
 (test (run '{
@@ -189,4 +208,19 @@
 ;misma funcion recursiva, pero introduciendo x con with
 (test (run '{
    {define {sub1until0 x} {if  (= x 0) x (sub1until0 (sub1 x))}}
-     {with {{x 1}} {sub1until0 x}}} '() #f) 0) 
+     {with {{x 1}} {sub1until0 x}}} '() #f) 0)
+
+;funciones definidas + with + tipos (no tienen efecto)
+(test (run '{
+   {define {same {x : Num} {y : Num}} : Num {= x y}}
+   {define {nand {x : Any} {y : Any}} : Num {! (&& x y)}}
+   {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
+         {if w (same x y) (nand x y)}}
+   } '() #f) #f)
+
+;|========================================================================|
+;| Notese que en el ejemplo anterior el caso falso  (nand x y)            |
+;| del if incluye un error de tipo, pues hace && de 1 y 2. Sin embargo,   |
+;| como w se evalua a #t, el intérprete no llega a evaluar dicho caso     |
+;| y por ende no se falla en ejecución(pues estamos en chequeo dinámico). |
+;|========================================================================|
