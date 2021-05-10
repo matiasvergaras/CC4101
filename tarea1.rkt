@@ -178,16 +178,16 @@ representation BNF:
   (let([tr (typecheck-expr r tenv fundefs)])
   (cond
     [(equal? op equal?) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
+    [(equal? op =) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
     [(equal? op +) (if (bool-op-check Num tl tr) Num (error stnumberboolean))]
     [(equal? op -) (if (bool-op-check Num tl tr) Num (error stnumberboolean))]
     [(equal? op /) (if (bool-op-check Num tl tr) Num (error stnumberboolean))]
     [(equal? op *) (if (bool-op-check Num tl tr) Num (error stnumberboolean))]
-    [(equal? op =) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
     [(equal? op >) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
     [(equal? op <) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
     [(equal? op <=) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
     [(equal? op >=) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
-    [else (if (bool-op-check Bool tl tr) (get-predominant-type tl tr) (error stbooleannumber))];lambdas && ||
+    [else (if (bool-op-check Bool tl tr) Bool (error stbooleannumber))];lambdas && ||
     ))))        
 
               

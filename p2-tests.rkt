@@ -124,6 +124,21 @@
 ;Buen comportamiento del typechecker con casos simples
 (test (typecheck '{#f}) 'Bool)
 
+;Buen comportamiento del typechecker con casos simples
+(test (typecheck '{{&& #f #t}}) 'Bool)
+
+;Buen comportamiento del typechecker con casos simples
+(test (typecheck '{{|| #f #t}}) 'Bool)
+
+;Buen comportamiento del typechecker con casos simples
+(test/exn (typecheck '{{|| 1 #t}}) "Static type error: expected Bool found Num")
+
+;with en el cual se asigna x Any y se usa en &&.
+;Typechecker debe respetar tipo estricto del operador (Bool).
+(test (typecheck
+       '{{with {{x : Any #t} {y : Any #f}}
+         {&& x y}}}) 'Bool)
+
 ;with en el cual se reestablece el tipo y valor de x.
 ;El tipo entregado debe concordar con el x de mas a la izqda.
 (test (typecheck
