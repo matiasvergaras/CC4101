@@ -3,9 +3,11 @@
 #| CC4101: Lenguajes de Programación
 -- Tarea 1 Semestre Otoño 2021 (2021-1)
 -- Alumno: Matías Vergara Silva
+-- Script principal
 |#
 
-#| ========= PARTE 1: LENGUAJE CON FUNCIONES DE PRIMER ORDEN |#
+#| ======= TAREA 1: LENGUAJE CON FUNCIONES DE PRIMER ORDEN =======|#
+#| -------  Tipos estáticos, tipos opcionales, contratos   -------|#
 
 #|
 -- Definimos los errores como constantes para evitar escribirlos varias veces.
@@ -714,31 +716,20 @@ representation BNF:
 
 
 
-; run : Src x List[FunDef]? -> Val
-(define (run prog [fundefs '()])
+; run : Src x List[FunDef]? x [Boolean] -> Val | error
+; recibe un programa en sintaxis concreta, una lista (opcional) de fundefs,
+; y un flag booleano indicando si usar o no typechecker. Retorna el valor
+; asociado al programa o error si corresponde.
+(define (run prog [fundefs '()] [use-typecheck #t])
   (let([parsed-prog (parse-prog prog)])
   (define parsed-prog (parse-prog prog))
+  (if use-typecheck
     (if (typecheck-prog parsed-prog)
         (interp-prog parsed-prog fundefs empty-env)
-        (error "Typecheck failed, but it didnt report any specific error :("))))
+        (error "Typecheck failed, but it didnt report any specific error :("))
+    
+        (interp-prog parsed-prog fundefs empty-env))))
 
-(test (run '{ ;; Programa de Ejemplo 1
-   {define {sum x y z} {+ x {+ y z}}}
-   {define {max x y} {if {< x y} y x}}
-   {with {{x 9}}
-        {sum {max x 6} 2 -10} }
-}) 1)
-
-(test (run '{ ;; Programa de Ejemplo 2
-   {with {{x 5} {y 7} {z 42}}
-         z}
-}) 42)
-
-(test (run '{ ;; Programa de Ejemplo 3
-   {define {triple x} {* 3 x}}
-   {define {add2 x} {+ 2 x}}
-   {add2 {triple 2}}
-}) 8)
 
 (test (run '{{with {{x : Num 5} {y : Num 10}} {+ x y}}}) 15)
 
@@ -781,25 +772,25 @@ representation BNF:
 ;P3 - multiples argumentos en funcion contrato
 (test/exn (run '{{define {positive x y} : Bool {> x 0}}
  {define {div {z : Num @ positive} y}
-           {/ y -1}}{div -1 3}})
+           {/ y -1}}{div -1 3}} '() #t )
  "Static contract error: invalid type for positive")
 
 ; para revisar que una definicion de funcion no sobreescriba a la otra
 (test (run '{{define {double {x : Num}} {+ x x}}
          {define {triple {x : Num}}
            {+ {+ x x} x}}
- {double 25}}) 50)
+ {double 25}} '() #t) 50)
 
 ; lo mismo pero en el orden inverso (la funcion buscada es la ultima en
 ; guardar x)
 (test (run '{{define {double {x : Num}} {+ x x}}
          {define {triple {x : Num}}
            {+ {+ x x} x}}
- {triple 25}}) 75)
+ {triple 25}} '() #f) 75)
 
 ;P3 - no cumplir con contrato
 (test/exn (run '{{define {positive x} : Bool {> x 0}}
  {define {div {x : Num @ positive} y}
-           {/ x y}}{div -1 3}})
+           {/ x y}}{div -1 3}} '() #f) 
   "Runtime contract error: -1 does not satisfy positive")
  

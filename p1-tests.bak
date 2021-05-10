@@ -1,0 +1,3 @@
+#lang play
+(print-only-errors #t)
+(require tarea1)
