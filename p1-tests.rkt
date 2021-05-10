@@ -81,13 +81,13 @@
          x}
 } '() #f) 12)
 
-;with con expresiones recursivas
+;with con expresiones anidadas
 (test (run '{ 
    {with {{x {+ 1 2}} {y {! #f}} {z {* 0 5}} {w {/ 3 6}}}
          {if y (> (+ x z) x) z}}
    } '() #f) #f)
 
-;with con expresiones recursivas y operacion en condicion
+;with con expresiones anidadas y operacion en condicion
 (test (run '{ 
    {with {{x {+ 1 2}} {y {! #f}} {z {* 0 5}} {w {/ 3 6}}}
          {if (! y) (> (+ x z) x) {* z z}}}
@@ -102,7 +102,7 @@
    } '() #f) 6) 
 
 ;with que usa una funcion booleana como expresion de un valor y
-;expresiones recursivas en la definicion de funciones
+;expresiones anidada en la definicion de funciones
 (test (run '{
    {define {same x y} {= x y}}
    {define {nand x y} {&& {! x}{! y}}}
@@ -136,7 +136,7 @@
          {if w (same x y) (+ x y)}}
    } '() #f) 3)
 
-;aplicacion recursiva de funciones con multiples argumentos
+;aplicacion anidada de funciones con multiples argumentos
 (test (run '{
    {define {restsqrt x y} {- (* x x) (* y y)}}
    {define {sum3 x y} {+ x 3}}
@@ -144,7 +144,7 @@
          {restsqrt (sum3 x y) y}}
    } '() #f) 12)
 
-;aplicacion recursiva de funciones con multiples argumentos
+;aplicacion anidada de funciones con multiples argumentos
 (test (run '{
    {define {restsqrt x y} {- (* x x) (* y y)}}
    {define {sum3 x y} {+ x 3}}
@@ -152,7 +152,7 @@
          {restsqrt (sum3 x y) y}}
    } '() #f) 12)
 
-;aplicacion recursiva de funciones con multiples argumentos
+;aplicacion anidada de funciones con multiples argumentos
 ;sin with de por medio
 (test (run '{
    {define {restsqrt x y} {- (* x x) (* y y)}}
@@ -160,7 +160,7 @@
    {restsqrt (sum3 1) 2}}
     '() #f) 12)
 
-;aplicacion recursiva de funciones con multiples argumentos
+;aplicacion anidada de funciones con multiples argumentos
 ;con with anidado
 (test (run '{
    {define {restsqrt x y} {- (* x x) (* y y)}}
@@ -168,7 +168,7 @@
    {restsqrt (sum3 {with {{w 4}} w}) 2}}
     '() #f) 45)
 
-;aplicacion recursiva de funciones con multiples argumentos
+;aplicacion anidada de funciones con multiples argumentos
 ;con with anidado (y con error de tipos). 
 (test/exn (run '{
    {define {restsqrt x y} {- (* x x) (* y y)}}

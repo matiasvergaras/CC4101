@@ -141,9 +141,9 @@ representation BNF:
 (define (typecheck-unop op p tenv fundefs)
   (let([tp (typecheck-expr p tenv fundefs)])
   (cond
-    [(equal? op not) (if (equal? tp Bool) Bool (error stbooleannumber))]
-    [(equal? op add1) (if (equal? tp Num) Num (error stnumberboolean))]
-    [(equal? op sub1) (if (equal? tp Num) Num (error stnumberboolean))]
+    [(equal? op not) (if (or(equal? tp Bool)(equal? tp Any)) Bool (error stbooleannumber))]
+    [(equal? op add1) (if (or(equal? tp Num)(equal? tp Any)) Num (error stnumberboolean))]
+    [(equal? op sub1) (if (or(equal? tp Num)(equal? tp Any)) Num (error stnumberboolean))]
     )))
 
 
@@ -177,7 +177,7 @@ representation BNF:
   (let([tl (typecheck-expr l tenv fundefs)])
   (let([tr (typecheck-expr r tenv fundefs)])
   (cond
-    [(equal? op equal?) (if (and (equal? tl Num)(equal? tr Num)) Num (error stnumberboolean))]
+    [(equal? op equal?) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
     [(equal? op +) (if (bool-op-check Num tl tr) Num (error stnumberboolean))]
     [(equal? op -) (if (bool-op-check Num tl tr) Num (error stnumberboolean))]
     [(equal? op /) (if (bool-op-check Num tl tr) Num (error stnumberboolean))]
@@ -273,13 +273,14 @@ representation BNF:
                (fundef-type fun)
                (error "Static type error in app. Unable to specify it."))
            (error (string-append "Static type error: arity mismatch - expected " (number->string (length funargs))
-                                 " arguments " (number->string (length args)) " but received " )))))]
+                                 " arguments but received " (number->string (length args)) )))))]
    ))
 
 
 #| typecheck-fun: Fundef -> Type | error
 -- recibe una definición de función y retorna su tipo
--- o error si es que corresponde 
+-- o error si es que el tipo del body no coincide con
+-- el tipo declarado para la función
 |#
 (define (typecheck-fun afun)
   (let([tfun (fundef-type afun)])

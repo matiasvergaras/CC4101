@@ -13,7 +13,7 @@
 
 
 
-#|------------------   Tests del enunciado  -----------------
+#|------------------   Tests del enunciado  -----------------|#
 
 (test (run '{{with {{x : Num 5} {y : Num 10}} {+ x y}}} '() #t) 15)
 
@@ -47,9 +47,8 @@
 
 
 #|------------------   Tests personalizados   -----------------|#
--- usaremos los mismos tests de la P1, pero variando la declaracion
--- de tipos.
-|#
+;-- usaremos los mismos tests de la P1, pero variando la declaracion
+;-- de tipos.
 
 
 ;Programa con error de tipos en una función que no se usa.
@@ -93,15 +92,24 @@
 
 
 ;Programa con error de tipos en un operador.
+;obs: (! x) pasa porque a x no se le declara tipo y racket acepta la negación de números.
 (test/exn (run '{
   {define {badsum x y} {+ (! x) y}}
-  {badsum 1 2}} '() #t ) "Static type error: expected Bool found Num")
+  {badsum 1 2}} '() #t ) "Static type error: expected Num found Bool")
 
 
-;Lo mismo, pero con tipos declarados. No deben tener efecto.
+;Lo mismo, pero declarando x como Num. debe caerse por la obs. anterior.
 (test/exn (run '{
-  {define {badsum {x : Any} {y : Num}} : Num {+ (! x) y}}
-  {badsum 1 2}} '() #t ) "Static type error: expected Bool found Num")
+  {define {badsum {x : Num} {y : Num}} : Num {+ (! x) y}}
+  {badsum 3 2}} '() #t ) "Static type error: expected Bool found Num")
+
+;Lo mismo, pero declarando x como Bool e introduciéndolo con with como Num.
+;También quitamos el error de (+ (! x) y) (bool como param de +) porque
+;se detecta antes y no deja testear lo que buscamos.
+;debe caerse por la obs. anterior.
+(test/exn (run '{
+  {define {badsum {x : Bool} {y : Num}} : Num {+ 1 y}}
+  {with {{x : Num 3}{y : Num 2}} {badsum x y}}} '() #t ) "Static type error: expected Bool found Num")
 
 ;Buen comportamiento con casos simples
 (test/exn (run '{{+ 1 #f}} '() #t) "Static type error: expected Num found Bool")
@@ -171,104 +179,107 @@
          {if (! y) (> (+ x z) x) {* z z}}}
    } '() #t) "Static type error")
 
+;usando una función con más argumentos de los que le corresponden
+(test/exn (run '{
+   {define {same x y} {= x y}}
+   {with {{x 10} {y 5} {z 2} {w #t}}
+         {if w (same x y x) (same x y)}}
+   } '() #t) "Static type error: arity mismatch - expected 2 arguments but received 3")
 
-#|
+
+
 ;with que usa una funcion numerica como expresion de un valor
 (test (run '{
    {define {triple x} {* 3 x}}
    {define {not x} {! x}}
    {with {{x {triple 2}} {y {! {> 2 {triple 1}}}} }
          {if y x 0}}
-   } '() #f) 6) 
+   } '() #f) 6)
+
 
 ;with que usa una funcion booleana como expresion de un valor y
 ;expresiones recursivas en la definicion de funciones
 (test (run '{
-   {define {same x y} {= x y}}
-   {define {nand x y} {&& {! x}{! y}}}
+   {define {same {x : Num} {y : Num}} {= x y}}
+   {define {nand {x : Any} {y : Any}} {&& {! x}{! y}}}
    {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
-         {if w (same x y) (+ x y)}}
-   } '() #f) 3) 
-
-;mismo test, cambiando nand por nor (para probar || y =)
-(test (run '{
-   {define {same x y} {= x y}}
-   {define {nand x y} {|| {! x}{! y}}}
+         {if w (same x y) (nand x y)}}
+   } '() #t) #f)
+(test (typecheck '{
+   {define {same {x : Num} {y : Num}} {= x y}}
+   {define {nand {x : Any} {y : Any}} {&& {! x}{! y}}}
    {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
-         {if w (same x y) (+ x y)}}
-   } '() #f) #f)
+         {if w (same x y) (nand x y)}}
+   }) 'Any)
 
-;mismo test, forzando error: operador = entre num y bool
+;mismo ejemplo anterior, pero declaramos tipo de same y nand como Num
+;lo cual es inconsistente (cuerpo es Bool, funcion es Num)
 (test/exn (run '{
-   {define {same x y} {= x y}}
-   {define {nand x y} {|| {! x}{! y}}}
+   {define {same {x : Num} {y : Num}} : Num {= x y}}
+   {define {nand {x : Any} {y : Any}} : Num {&& {! x}{! y}}}
    {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
-         {if w (same #t y) (+ x y)}}
-   } '() #f) "Runtime type error: expected Number found Boolean")
+         {if w (same x y) (nand x y)}}
+   } '() #t) "Static type error: expected Bool found Num")
 
-;mismo test, forzando error: operador && entre num y bool
-;esto no se cae en esta parte ya que racket acepta el and
-;entre num y bool.
+
+;mismo ejemplo anterior, pero declaramos tipo de same y nand como Any
+;por lo cual run debe retornar y typecheck debe dar 'Any
 (test (run '{
-   {define {same x y} {= x y}}
-   {define {nand x y} {|| {! x}{! y}}}
-   {with {{x 1} {y 2} {z #t} {w (nand 1 2)}}
-         {if w (same x y) (+ x y)}}
-   } '() #f) 3)
+   {define {same {x : Num} {y : Num}} : Any {= x y}}
+   {define {nand {x : Any} {y : Any}} : Any {&& {! x}{! y}}}
+   {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
+         {if w (same x y) (nand x y)}}
+   } '() #t) #f)
 
-;aplicacion recursiva de funciones con multiples argumentos
+(test (typecheck '{
+   {define {same {x : Num} {y : Num}} : Any {= x y}}
+   {define {nand {x : Any} {y : Any}} : Any {&& {! x}{! y}}}
+   {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
+         {if w (same x y) (nand x y)}}
+   })  'Any)
+
+;mismo ejemplo anterior, pero declaramos tipo de same y nand como Bool
+;(consistente con el cuerpo, debe incidir retorno de typecheck)
 (test (run '{
-   {define {restsqrt x y} {- (* x x) (* y y)}}
-   {define {sum3 x y} {+ x 3}}
-   {with {{x 1} {y 2}}
-         {restsqrt (sum3 x y) y}}
-   } '() #f) 12)
+   {define {same {x : Num} {y : Num}} : Bool {= x y}}
+   {define {nand {x : Any} {y : Any}} : Bool {&& {! x}{! y}}}
+   {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
+         {if w (same x y) (nand x y)}}
+   } '() #t) #f)
 
-;aplicacion recursiva de funciones con multiples argumentos
-(test (run '{
-   {define {restsqrt x y} {- (* x x) (* y y)}}
-   {define {sum3 x y} {+ x 3}}
-   {with {{x 1} {y 2}}
-         {restsqrt (sum3 x y) y}}
-   } '() #f) 12)
+(test (typecheck '{
+   {define {same {x : Num} {y : Num}} : Bool {= x y}}
+   {define {nand {x : Any} {y : Any}} : Bool {&& {! x}{! y}}}
+   {with {{x 1} {y 2} {z #t} {w (nand #f #t)}}
+         {if w (same x y) (nand x y)}}
+   }) 'Bool)
 
-;aplicacion recursiva de funciones con multiples argumentos
+
+
+;aplicacion anidada de funciones con multiples argumentos
 ;sin with de por medio
+;typecheck debe dar 'Num aunque sum se defina como Any pues
+;los operadores binarios tienen tipo estricto
 (test (run '{
-   {define {restsqrt x y} {- (* x x) (* y y)}}
-   {define {sum3 x} {+ x 3}}
+   {define {restsqrt (x : Num) (y : Num)} : Num {- (* x x) (* y y)}}
+   {define {sum3 (x : Num)} : Any {+ x 3}}
    {restsqrt (sum3 1) 2}}
-    '() #f) 12)
+    '() #t) 12)
+(test (typecheck '{
+   {define {restsqrt (x : Num) (y : Num)} : Num {- (* x x) (* y y)}}
+   {define {sum3 (x : Num)} : Any {+ x 3}}
+   {restsqrt (sum3 1) 2}}
+   ) 'Num)
 
-;aplicacion recursiva de funciones con multiples argumentos
-;con with anidado
+;funcion recursiva, definida en base a if.
+;run con typecheck desactivado la ejecuta sin problemas...
 (test (run '{
-   {define {restsqrt x y} {- (* x x) (* y y)}}
-   {define {sum3 x} {+ x 3}}
-   {restsqrt (sum3 {with {{w 4}} w}) 2}}
-    '() #f) 45)
-
-;aplicacion recursiva de funciones con multiples argumentos
-;con with anidado (y con error de tipos). 
-(test/exn (run '{
-   {define {restsqrt x y} {- (* x x) (* y y)}}
-   {define {sum3 x} {+ x 3}}
-   {restsqrt (sum3 {with {{w {+ 1 #t}}} w}) 2}}
-    '() #f) "Runtime type error: expected Number found Boolean")
-
-;funcion recursiva, definida en base a if
-(test (run '{
-   {define {sub1until0 x} {if (= x 0) x (sub1until0 (sub1 x))}}
+   {define {sub1until0 (x : Any)} : Num {if (= x 0) x (sub1until0 (sub1 x))}}
      {sub1until0 5}} '() #f) 0)
-
-;misma funcion recursiva, pero se debe caer en el caso base
-(test/exn (run '{
-   {define {sub1until0 x} {if (= 0 (= x 0)) x (sub1until0 (sub1 x))}}
-     {sub1until0 5}} '() #f) "Runtime type error: expected Number found Boolean")
-
-;misma funcion recursiva, pero introduciendo x con with
-(test (run '{
-   {define {sub1until0 x} {if  (= x 0) x (sub1until0 (sub1 x))}}
-     {with {{x 1}} {sub1until0 x}}} '() #f) 0)
-
-|#
+;...Pero si activamos el typecheck, el programa no tipa. Esto debido a que
+;en el typecheck, se revisa que el tipo del cuerpo de una función coincida con el
+;tipo declarado para esta, y como en este caso se trata de la misma función,
+;el comportamiento esperado es que no encuentre la definición. 
+(test/exn (typecheck  '{
+   {define {sub1until0 (x : Any)} : Num {if (= x 0) x (sub1until0 (sub1 x))}}
+     {sub1until0 5}}) "Static error: undefined function")
