@@ -299,7 +299,7 @@ representation BNF:
 |#
 (define (extend-tenv-list dictlist tenv)
   (cond
-    [(empty? dictlist) mtTenv]
+    [(empty? dictlist) tenv]
     [else
       (match (first dictlist)
         [(or (? arg? a) (? argcon? a))
@@ -316,12 +316,10 @@ representation BNF:
 -- de los parámetros de las funciones.
 |#
 (define (extend-tenv-fun fundefs atenv)
-  (let([mt mtTenv])
   (match fundefs
     ['() mtTenv]
-    [else (map (lambda (entry)
-                      (extend-tenv-list (fundef-args entry) atenv))
-                      fundefs)]
+    [else (foldr (lambda (a b) (extend-tenv-list a b)) atenv
+                 (map (lambda (entry) (fundef-args entry)) fundefs))]
     ))
 
 #| typecheck-contracts: Tenv List[Fundef] -> Bool | error
@@ -332,24 +330,19 @@ representation BNF:
 -- Retorna true si se cumple para todos, false si no.
 |#
 (define (typecheck-contracts tenv fundefs)
-  (displayln "plop1")
-  (displayln tenv)
   (match tenv
-    [(list (aTenv ar rest) ...)
-     (displayln "plop2")
-     (displayln ar)
+    [(aTenv ar rest)
      (match ar
-       [(list (? argcon? a) ...)
-        (displayln "plop3")
+       [(? argcon? a)
         (let([fcont (lookup-fundef (argcon-cont a) fundefs)])
-          (if (equal? (typecheck-fun fcont) Bool)
+          (if (equal? (parse-type (typecheck-fun fcont)) Bool)
               (if (equal? (length (fundef-args fcont)) 1)
                   (typecheck-contracts rest fundefs)
-                  (error (string-append "Static contract error: too many return values "
-                                        "for contract " fcont ". Expected 1, "
-                                        "found " (number->string (length (fundef-args fcont)))))
-                  )
-              (error (string-append "Static contract error: invalid type for " fcont )))
+                  (error (string-append "Static contract error: invalid type for "
+                                        (symbol->string(fundef-fname  fcont))))
+                  ) ; a este error le pondria otro mensaje mas descriptivo,
+                    ; pero dejo este para que concuerde con lo que pide el enunciado.
+              (error (string-append "Static contract error: invalid type for " (symbol->string(fundef-fname  fcont)))))
           )]
        [else (typecheck-contracts rest fundefs)])
        ]
@@ -661,7 +654,8 @@ representation BNF:
       [ else
         ( extend-env (car (first dictlist))
                     (interp (car(cdr (first dictlist))) fundefs env)
-                    (extend-env-list (rest dictlist)))]))
+                    (extend-env-list (rest dictlist)))
+        ]))
 
   #| app-map-list :: List[id] x List[expr] -> Env
   -- extiende el ambiente dado con los pares (identificador, expr)
@@ -669,14 +663,35 @@ representation BNF:
   |#
   (define (app-map-list args es)
     (cond
-      [(and (empty? args) (not (empty? es))) (error "Not enough arguments")]
-      [(and (not (empty? args)) (empty? es)) (error "Too many arguments")]
+      [(and (empty? args) (not (empty? es))) (error "Runtime arity error: Not enough arguments")]
+      [(and (not (empty? args)) (empty? es)) (error "Runtime arity error: Too many arguments")]
+      ; los casos anteriores deberían ser capturados en typechecking, mas dejamos esto acá
+      ; por si algún error llegase a pasar dicho filtro. 
       [(and (empty? args) (empty? es)) empty-env]
       [else
         (extend-env ( first args )
                     ( interp (first es) fundefs env )
                     (app-map-list (rest args) (rest es)))]))
-  
+
+  #| verify-contracts :: List[Arg] List[Expr] -> boolean | error
+  -- recibe una lista de argumentos y las expresiones correspondientes a ellos
+  -- y verifica que cumplan el contrato especificado (si es que aplica).
+  -- Retorna true en dicho caso, error en caso contrario.
+  |#
+  (define (verify-contracts args exps)
+    (match args
+      ['() #t]
+      [(list (? argcon? ac) restargs)
+       (let([contract (lookup-fundef (argcon-cont ac) fundefs)])
+         (let([val (interp (app (fundef-fname contract) (list (first exps))) fundefs env)])
+         (if val
+             (verify-contracts restargs (rest exps))
+             (error (format "Runtime contract error: ~a does not satisfy ~a"
+                                   (interp (first exps) fundefs env)
+                                   (symbol->string (fundef-fname contract)))))))]
+      [else
+       (if (list? args)(verify-contracts (rest args) (rest exps)) #t)]))
+                                                    
   (match expr
     [(num n) n]
     [(id x) (env-lookup x env)]  ; buscamos el identificador en el env
@@ -691,20 +706,21 @@ representation BNF:
                 (interp cond-false fundefs env))]
     [(with dictlist b)
      (interp b fundefs (extend-env-list dictlist))]
-    [(app f es)
+    [(app f exps)
      (def (fundef _ args type body) (lookup-fundef f fundefs))
-     (interp body fundefs (app-map-list args es))] ;; queremos scope lexico!
+     (verify-contracts args exps)
+     (interp body fundefs (app-map-list args exps))] ;; queremos scope lexico!
     ))
 
 
 
 ; run : Src x List[FunDef]? -> Val
 (define (run prog [fundefs '()])
+  (let([parsed-prog (parse-prog prog)])
   (define parsed-prog (parse-prog prog))
     (if (typecheck-prog parsed-prog)
         (interp-prog parsed-prog fundefs empty-env)
-        (error "Typecheck failed, but it didnt report any specific error :(")))
-
+        (error "Typecheck failed, but it didnt report any specific error :("))))
 
 (test (run '{ ;; Programa de Ejemplo 1
    {define {sum x y z} {+ x {+ y z}}}
@@ -754,12 +770,19 @@ representation BNF:
                             z}})
   "Static type error: expected Num found Bool")
 
-;(test/exn (run '{{define {positive x} : Bool {> x 0}}
-; {define {div {z : Num @ positive} y}
-;           {/ y -1}}
-; {div -1 3}}) "contract")
+(test/exn (run '{{define {positive x} : Any {> x 0}}
+ {define {div {z : Num @ positive} y}
+           {/ y -1}}
+ {div -1 3}})
+  "Static contract error: invalid type for positive")
+
 
 ; ================== TESTS PERSONALIZADOS =================
+;P3 - multiples argumentos en funcion contrato
+(test/exn (run '{{define {positive x y} : Bool {> x 0}}
+ {define {div {z : Num @ positive} y}
+           {/ y -1}}{div -1 3}})
+ "Static contract error: invalid type for positive")
 
 ; para revisar que una definicion de funcion no sobreescriba a la otra
 (test (run '{{define {double {x : Num}} {+ x x}}
@@ -773,3 +796,10 @@ representation BNF:
          {define {triple {x : Num}}
            {+ {+ x x} x}}
  {triple 25}}) 75)
+
+;P3 - no cumplir con contrato
+(test/exn (run '{{define {positive x} : Bool {> x 0}}
+ {define {div {x : Num @ positive} y}
+           {/ x y}}{div -1 3}})
+  "Runtime contract error: -1 does not satisfy positive")
+ 
