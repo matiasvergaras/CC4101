@@ -189,4 +189,4 @@
 ;misma funcion recursiva, pero introduciendo x con with
 (test (run '{
    {define {sub1until0 x} {if  (= x 0) x (sub1until0 (sub1 x))}}
-     {with {{x 1}} {sub1until0 x}}} '() #f) 0)
+     {with {{x 1}} {sub1until0 x}}} '() #f) 0) 

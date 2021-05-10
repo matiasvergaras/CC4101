@@ -178,10 +178,10 @@ representation BNF:
   (let([tr (typecheck-expr r tenv fundefs)])
   (cond
     [(equal? op equal?) (if (and (equal? tl Num)(equal? tr Num)) Num (error stnumberboolean))]
-    [(equal? op +) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
-    [(equal? op -) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
-    [(equal? op /) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
-    [(equal? op *) (if (bool-op-check Num tl tr) (get-predominant-type tl tr) (error stnumberboolean))]
+    [(equal? op +) (if (bool-op-check Num tl tr) Num (error stnumberboolean))]
+    [(equal? op -) (if (bool-op-check Num tl tr) Num (error stnumberboolean))]
+    [(equal? op /) (if (bool-op-check Num tl tr) Num (error stnumberboolean))]
+    [(equal? op *) (if (bool-op-check Num tl tr) Num (error stnumberboolean))]
     [(equal? op =) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
     [(equal? op >) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
     [(equal? op <) (if (bool-op-check Num tl tr) Bool (error stnumberboolean))]
@@ -254,7 +254,7 @@ representation BNF:
      (let([tcond (typecheck-expr condition tenv fundefs)])
      (let([ttrue (typecheck-expr cond-true tenv fundefs)])
      (let([tfalse (typecheck-expr cond-false tenv fundefs)])
-     (if (equal? tcond Bool)
+     (if (or (equal? tcond Bool)(equal? tcond Any))
          (if (or (equal? ttrue tfalse) (or (equal? ttrue Any) (equal? tfalse Any)))
              (if (or (equal? ttrue Any) (equal? tfalse Any)) Any ttrue)
              (error (string-append "Static type error: expected "(string-type ttrue)
@@ -291,9 +291,8 @@ representation BNF:
           (dsp-type tfun)
           (if (equal? tfun Any)
               (dsp-type tfun)
-              (error (string-append "Static type error. Function with"
-                                " declared type " (string-type tfun)
-                                " but body has type " (string-type tbody)))))))))
+              (error (string-append "Static type error: expected "(string-type tbody)
+                                " found " (string-type tfun) ))))))))
 
 #| extend-tenv-list :: List[Pair[arg, expr]] x Tenv -> Tenv
 -- extiende el ambiente de tipos dado con los args
@@ -731,35 +730,6 @@ representation BNF:
         (interp-prog parsed-prog fundefs empty-env))))
 
 
-(test (run '{{with {{x : Num 5} {y : Num 10}} {+ x y}}}) 15)
-
-(test (run '{{define {gt42 x} : Bool {> x 42}}
- {gt42 43}}) #t)
-
-(test (run '{{define {id {x : Num}} x}
- {id 5}}) 5)
-
-(test/exn (run '{{define {add2 {x : Num}} {+ x 2}}
- {with {{oops #f}}
-   {add2 oops}}}) "Runtime type error")
-
-(test (typecheck '{3}) 'Num)
-
-(test (typecheck '{{define {f {p : Bool}} {&& p {! p}}}
-                          {f {> 3 4}}}) 'Any)
-
-(test/exn (typecheck '{{define {one {x : Num}} 1}
-                          {one #t}}) "Static type error: expected Num found Bool")
-
-(test/exn (typecheck '{{> 10 #t}})
-  "Static type error: expected Num found Bool")
-
-(test/exn (typecheck '{{if 73 #t #t}})
-  "Static type error: expected Bool found Num")
-
-(test/exn (typecheck '{{with {{x 5} {y : Num #t} {z 42}}
-                            z}})
-  "Static type error: expected Num found Bool")
 
 (test/exn (run '{{define {positive x} : Any {> x 0}}
  {define {div {z : Num @ positive} y}
