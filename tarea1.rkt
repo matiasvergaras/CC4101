@@ -57,6 +57,7 @@
     [(? arg? ar) (arg-id ar)]
     [(? argcon? ar) (argcon-id ar)]))
 
+
 #| argument-type:: Arg -> Type
 -- recibe una estructura del tipo Arg
 -- y devuelve el tipo correspondiente
@@ -124,6 +125,10 @@ representation BNF:
     [(equal? Bool t) 'Bool]
     [else 'Any]))
 
+; Algunos tests unitarios
+(test {dsp-type Num} 'Num)
+(test {dsp-type Bool} 'Bool)
+(test {dsp-type Any} 'Any)
 
 #| string-type: Type -> string
 -- entrega un string correspondiente al tipo ingresado.
@@ -135,6 +140,11 @@ representation BNF:
     [(equal? Num t) "Num"]
     [(equal? Bool t) "Bool"]
     [else "Any"]))
+
+;Algunos tests unitarios
+(test (string-type Num) "Num")
+(test (string-type Bool) "Bool")
+(test (string-type Any) "Any")
 
 
 #| typecheck-unop: unop expr -> Type | error
@@ -149,6 +159,7 @@ representation BNF:
     [(equal? op add1) (if (or(equal? tp Num)(equal? tp Any)) Num (error stnumberboolean))]
     [(equal? op sub1) (if (or(equal? tp Num)(equal? tp Any)) Num (error stnumberboolean))]
     )))
+
 
 
 #| typecheck-binop: binop expr expr -> Type | error
@@ -193,7 +204,6 @@ representation BNF:
     ))))        
 
               
-  
 #| typecheck-expr: expr x tenv x list[Fundef] -> Type | error
 -- recibe una expresion, un ambiente de tipos
 -- y retorna el tipo de la expresion
@@ -423,42 +433,22 @@ representation BNF:
 |#
 (define unops (list '! 'add1 'sub1))
 
-#| unop-over-nums ::= add1 | sub1
--- operadores unarios que toman numeros como parametros
-|#
-(define unops-over-nums (list add1 sub1))
 
 #| is-unop? ::= Procedure -> boolean
 -- verifica si un operador dado está en la lista de unops.
 |#
 (define (is-unop? x) (member x unops))
 
-#| is-unop-over-nums? ::= symbol -> boolean
--- verifica si un operador dado en sintaxis concreta
--- está en la lista de unops que reciben nums.
-|#
-(define (is-unop-over-nums? x) (in-list x unops-over-nums))
-
 #| <binops> ::= + | - | * | / | && | || / = | < | ...
 -- lista de operadores que toman dos valores como parámetros.
 |#
 (define binops (list '+ '- '* '/ '&& '|| '= '> '<))
-
-#| binops-over-nums? ::= + | - | / | > | < 
--- operadores binarios que toman dos numeros como parametros
-|#
-(define binops-over-nums (list '+ '- '* '/ '> '=))
 
 #| is-binop? ::= Procedure -> Boolean
 -- verifica si un operador dado está en la lista de binops.
 |#
 (define (is-binop? x) (member x binops))
 
-#| is-binop-over-nums? ::= Symbol -> Boolean
--- verifica si un operador dado en sintaxis concreta
--- está en la lista de binops que reciben numeros.
-|#
-(define (is-binop-over-nums? x) (in-list x binops-over-nums))
 
 #| lookup-fundef: id List[FunDef] -> FunDef o error
 -- busca la funcion de nombre fname en la lista fundefs y la retorna
@@ -610,26 +600,21 @@ representation BNF:
          val
          (env-lookup x rest))]))
 
-
-#| unparse-op :: unop|binop -> src
--- realiza la conversion de sintaxis abstracta a sintaxis concreta
--- para un operador unario o binario.
+#| matcheable-ops :: +| - | * | / | > | < | add1 | sub1 | not | equals?
+-- lista para capturar los operadores para los cuales realizar match es
+-- posible (todos salvo los lambdas, para lo cual no se logró).
 |#
-(define (unparse-op op)
-(match op
-  [= '=]
-  [+ '+]
-  [- '-]
-  [* '*]
-  [/ '/]
-  [> '>]
-  [< '<]
-  [not '!]
-  [add1 'add1]
-  [sub1 'sub1]
-  ))
+(define matcheable-ops (list + - * / > < add1 sub1 not equal?))
 
-(define unparseable-op (list + - * / > < add1 sub1 not equal?))
+#| binops-over-nums? ::= + | - | / | > | < 
+-- operadores binarios que toman dos numeros como parametros
+|#
+(define binops-over-nums (list + - * / > < equal?))
+
+#| unop-over-nums ::= add1 | sub1
+-- operadores unarios que toman numeros como parametros
+|#
+(define unops-over-nums (list add1 sub1))
 
 #| interp :: Expr x List[FunDef] x Env -> Number|Boolean o error
 -- evalua expresiones aritméticas y booleanas
@@ -641,8 +626,8 @@ representation BNF:
   -- operador puede operar, y en dicho caso, los opera.
   |#
   (define (interp-binop op l r)
-    (if (in-list op unparseable-op)
-        (if (is-binop-over-nums? (unparse-op op))
+    (if (in-list op matcheable-ops)
+        (if (in-list op binops-over-nums)
             (if (and (number? l)(number? r))
                 (op l r)
                 (error rtnumberboolean))
@@ -654,14 +639,13 @@ representation BNF:
             (error rtbooleannumber)))
     )
   
-
   #| interp-unop :: Expr x number|boolean -> Number|Boolean o error
   -- verifica que lo resultados de interpretar los operandos de un
   -- operador unario correspondan a los tipos que dicho operador puede operar
   -- y en dicho caso, los opera.
   |#
   (define (interp-unop op param)
-    (if (is-unop-over-nums?  op)
+    (if (in-list op unops-over-nums)
         (if (number? param)
             (op param)
             (error rtnumberboolean))
@@ -755,3 +739,17 @@ representation BNF:
         (error "Typecheck failed, but it didnt report any specific error :("))
     
         (interp-prog parsed-prog fundefs empty-env))))
+
+
+;Algunos tests unitarios
+(test (typecheck-unop not (parse #t) mtTenv '()) Bool)
+(test (typecheck-unop add1 (parse 12) mtTenv '()) Num)
+(test (typecheck-unop sub1 (parse 5) mtTenv '()) Num)
+
+(test (typecheck-binop = (parse 1) (parse 2) mtTenv '()) Bool)
+(test (typecheck-binop + (parse (+ 1 2)) (parse 6) mtTenv '()) Num)
+(test (typecheck-binop - (parse (+ 5 2)) (parse 4) mtTenv '()) Num)
+(test (typecheck-binop * (parse '(with {{x 1}{y 2}{z {+ 1 2}}} {+ (+ x y) z})) (parse 1) mtTenv '()) Num)
+(test (typecheck-binop / (parse 18) (parse 5) mtTenv '()) Num)
+(test (typecheck-binop > (parse 1) (parse 0) mtTenv '()) Bool)
+
