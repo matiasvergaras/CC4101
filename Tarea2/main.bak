@@ -1,10 +1,4 @@
 #lang play
-(print-only-errors #t)
-#| CC4101: Lenguajes de Programación
--- Tarea 2 Semestre Otoño 2021 (2021-1)
--- Alumno: Matías Vergara Silva
--- Script principal
-|#
 
 #|
 <expr> ::= <num>
@@ -53,12 +47,12 @@
   (dfine name val-expr) ; define
   (datatype name variants)) ; datatype
 
-; variantes                   #un datatype tiene un nombre y distintas variantes
+; variantes
 (deftype Variant
   (variant name params))
 
-; estructuras de datos        #una estructura de datos tiene un nombre, una variante y valores
-(deftype Struct              
+; estructuras de datos
+(deftype Struct
   (structV name variant values))
 
 ; caso en pattern matching
@@ -209,10 +203,7 @@
 
 ;; run :: s-expr -> number/boolean/procedura/struct
 (define(run prog [flag ""])
-  (let [(res (interp (parse prog) empty-env))]
-        (if (equal? flag "ppwu")
-            (pretty-printing res)
-            res)))
+  (interp (parse prog) empty-env))
 
 
 #|-----------------------------
@@ -266,40 +257,3 @@ update-env! :: Sym Val Env -> Void
     (not     ,(lambda args (apply not args)))
     (and     ,(lambda args (apply (lambda (x y) (and x y)) args)))
     (or      ,(lambda args (apply (lambda (x y) (or x y)) args)))))
-
-;; pretty-printing :: <struct> -> String
-(define (pretty-printing strct)
-  (match strct
-    [(structV name variant values)
-     (string-append "{" (symbol->string variant) (pretty-printing values) "}")]
-    [(list anidated ...)
-     (foldr (lambda (a b) (string-append " " (pretty-printing a) b)) "" anidated)] 
-  ))
-
-
-
-#| pretty-printing: struct --> String
-;                | <Cons a <Cons b ...>> --> "{list a b ...}"                           
-; retorna un string con la structura vista de manera mas amigable
-(define (pretty-printing expr)
-  (match expr
-    [(structV 'List variant values)(string-append "{list" (ciclo-pretty-list expr) "}")] ;; aca se inicializa el list y de ahi entra al "ciclo"
-    [(structV name variant values) (string-append "{" (symbol->string variant)
-                                                  (pretty-printing values) "}")]
-    [(list values ...) (foldr (lambda (new before) (string-append " " (pretty-printing new) before)) "" values)] ;(string-append " " (pretty-printing a))]
-    [x (~a x)]))
-
-
-; ciclo-pretty-list: <struct List'> --> String
-; retorna un string con la structura interna de una lista, es decir omitiendo parentesis exteriores y el nombre "lista",
-; esto para evitar escribir "lista" en cada iteración del pretty-printing
-; ej: (ciclo-pretty-list '{cons 1 {cons 2 {cons 3 empty}}}) --> " 1 2 3"
-(define (ciclo-pretty-list list)
-  (match list
-    [(structV 'List 'Empty _) ""]
-    [(structV 'List 'Cons values)
-     (def (list val rest) values)
-     {string-append " " (if (number? val) (number->string val) (pretty-printing val)) (ciclo-pretty-list rest)}]
-    ))
-
-|#
