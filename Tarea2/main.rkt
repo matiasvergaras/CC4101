@@ -276,30 +276,3 @@ update-env! :: Sym Val Env -> Void
      (foldr (lambda (a b) (string-append " " (pretty-printing a) b)) "" anidated)] 
   ))
 
-
-
-#| pretty-printing: struct --> String
-;                | <Cons a <Cons b ...>> --> "{list a b ...}"                           
-; retorna un string con la structura vista de manera mas amigable
-(define (pretty-printing expr)
-  (match expr
-    [(structV 'List variant values)(string-append "{list" (ciclo-pretty-list expr) "}")] ;; aca se inicializa el list y de ahi entra al "ciclo"
-    [(structV name variant values) (string-append "{" (symbol->string variant)
-                                                  (pretty-printing values) "}")]
-    [(list values ...) (foldr (lambda (new before) (string-append " " (pretty-printing new) before)) "" values)] ;(string-append " " (pretty-printing a))]
-    [x (~a x)]))
-
-
-; ciclo-pretty-list: <struct List'> --> String
-; retorna un string con la structura interna de una lista, es decir omitiendo parentesis exteriores y el nombre "lista",
-; esto para evitar escribir "lista" en cada iteración del pretty-printing
-; ej: (ciclo-pretty-list '{cons 1 {cons 2 {cons 3 empty}}}) --> " 1 2 3"
-(define (ciclo-pretty-list list)
-  (match list
-    [(structV 'List 'Empty _) ""]
-    [(structV 'List 'Cons values)
-     (def (list val rest) values)
-     {string-append " " (if (number? val) (number->string val) (pretty-printing val)) (ciclo-pretty-list rest)}]
-    ))
-
-|#
