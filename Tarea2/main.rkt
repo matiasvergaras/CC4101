@@ -71,8 +71,12 @@
   (litP l) ; valor literal
   (constrP ctr patterns)) ; constructor y sub-patrones
 
-;; parse :: s-expr -> Expr
-(define(parse s-expr)
+#| parse :: s-expr -> Expr
+-- toma sintaxis concreta y retorna una Expr (sintaxis abstracta).
+-- se modifica version entregada para agregar parseo del tipo
+-- inductivo List, incorporando '{list ...} como azucar sintáctico.
+|#
+(define (parse s-expr)
   (match s-expr
     [(? number?) (num s-expr)]
     [(? boolean?) (bool s-expr)]
@@ -82,14 +86,19 @@
     [(list 'fun xs b) (fun xs (parse b))]
     [(list 'with (list (list x e) ...) b)
      (app (fun x (parse b)) (map parse e))]
-    [(list 'local defs body)
+    [(list 'list) ; inductive type List , case Empty 
+     (parse (list 'Empty))] 
+    [(list 'list vals ...) ; inductive type List, case Cons 
+     (parse (list 'Cons (first vals) (list* 'list (rest vals))))] ;* to catch the final '()
+    [(list 'local defs body)                                      ;as tail of the last element
      (lcal (map parse-def defs) (parse body))]
     [(list 'match val-expr cases ...) ; note the elipsis to match n elements
      (mtch (parse val-expr) (map parse-case cases))] ; cases is a list
     [(list f args ...) ; same here
      (if (assq f *primitives*)
          (prim-app f (map parse args)) ; args is a list
-         (app (parse f) (map parse args)))]))
+         (app (parse f) (map parse args)))]
+  ))
 
 ; parse-def :: s-expr -> Def
 (define(parse-def s-expr)
@@ -108,16 +117,22 @@
     [(list 'case pattern => body) (cse (parse-pattern pattern) (parse body))]))
 
 ; parse-pattern :: sexpr -> Pattern
-(define(parse-pattern p)
+(define (parse-pattern p)
   (match p
     [(? symbol?)  (idP p)]
     [(? number?)  (litP (num p))]
     [(? boolean?) (litP (bool p))]
     [(? string?)  (litP (str p))]
-    [(list ctr patterns ...) (constrP (first p) (map parse-pattern patterns))]))
+    ;same parsing for List as defined in parse
+    [(list 'list) ; inductive type List , case Empty 
+     (parse-pattern (list 'Empty))] 
+    [(list 'list vals ...) ; inductive type List, case Cons 
+     (parse-pattern (list 'Cons (first vals) (list* 'list (rest vals))))]
+    [(list ctr patterns ...) (constrP (first p) (map parse-pattern patterns))]
+    ))
 
 ;; interp :: Expr Env -> number/boolean/procedure/Struct
-(define(interp expr env)
+(define (interp expr env)
   (match expr
     ; literals
     [(num n) n]
@@ -154,7 +169,7 @@
      (interp body (extend-env (map car alist) (map cdr alist) env))]))
 
 ; interp-def :: Def Env -> Void
-(define(interp-def d env)
+(define (interp-def d env)
   (match d
     [(dfine id val-expr)
      (update-env! id (interp val-expr env) env)]
@@ -164,14 +179,14 @@
      (for-each (λ (v) (interp-variant name v env)) variants)]))
 
 ; interp-datatype :: String Env -> Void
-(define(interp-datatype name env)
+(define (interp-datatype name env)
   ; datatype predicate, eg. Nat?
   (update-env! (string->symbol (string-append (symbol->string name) "?"))
                (λ (v) (symbol=? (structV-name (first v)) name))
                env))
 
 ; interp-variant :: String String Env -> Void
-(define(interp-variant name var env)
+(define (interp-variant name var env)
   ;; name of the variant or dataconstructor
   (def varname (variant-name var))
   ;; variant data constructor, eg. Zero, Succ
@@ -184,7 +199,7 @@
                env))
 
 ;;;;; pattern matcher
-(define(find-first-matching-case value cases)
+(define (find-first-matching-case value cases)
   (match cases
     [(list) #f]
     [(cons (cse pattern body) cs)
@@ -193,7 +208,7 @@
            (cons r body)
            (find-first-matching-case value cs)))]))
 
-(define(match-pattern-with-value pattern value)
+(define (match-pattern-with-value pattern value)
   (match/values (values pattern value)
                 [((idP i) v) (list (cons i v))]
                 [((litP (bool v)) b)
@@ -207,12 +222,21 @@
                      (list #f))]
                 [(x y) (error "Match failure")]))
 
-;; run :: s-expr -> number/boolean/procedura/struct
-(define(run prog [flag ""])
-  (let [(res (interp (parse prog) empty-env))]
-        (if (equal? flag "ppwu")
-            (pretty-printing res)
-            res)))
+
+#| run :: s-expr [String] -> number/boolean/procedura/struct/String 
+-- recibe una s-expr y, opcionalmente, un flag indicando si usar
+-- pretty-printing: "ppwu". Retorna el resultado de parsear e interpretar la s-expr
+-- en un ambiente con la estructura de datos 'List' y la función 'length'.
+|#
+(define (run prog [flag ""])
+  (let [(res (interp (parse (list 'local my-list prog)) empty-env))]
+    (match flag
+      ["" res]
+      ["ppwu" (pretty-printing res)]
+      ["pp" (pretty-printing res "pp")]
+      )
+    )
+  )
 
 
 #|-----------------------------
@@ -228,7 +252,7 @@ update-env! :: Sym Val Env -> Void
 
 (def empty-env  (mtEnv))
 
-(define(env-lookup id env)
+(define (env-lookup id env)
   (match env
     [(mtEnv) (error 'env-lookup "no binding for identifier: ~a" id)]
     [(aEnv bindings rest)
@@ -242,7 +266,7 @@ update-env! :: Sym Val Env -> Void
         env))
 
 ;; imperative update of env, adding/overriding the binding for id.
-(define(update-env! id val env)
+(define (update-env! id val env)
   (set-aEnv-bindings! env (cons (cons id val) (aEnv-bindings env))))
 
 ;;;;;;;
@@ -267,12 +291,57 @@ update-env! :: Sym Val Env -> Void
     (and     ,(lambda args (apply (lambda (x y) (and x y)) args)))
     (or      ,(lambda args (apply (lambda (x y) (or x y)) args)))))
 
-;; pretty-printing :: <struct> -> String
-(define (pretty-printing strct)
-  (match strct
-    [(structV name variant values)
+     
+
+#| pretty-printing :: <struct> | procedure | Number | Boolean -> String
+-- recibe un valor resultante de aplicar interp y lo retorna como un string
+-- mas 'amigable' al lector.
+|#
+(define (pretty-printing intp [flag ""])
+  (match intp
+    [(structV 'List variant values) ;most specific case: structV name is 'List
+     (if (equal? flag "pp")
+         (string-append "{list" (List-to-string intp) "}") ;pp
+         (string-append "{" (symbol->string variant) (pretty-printing values) "}") ;ppwu
+         )]
+    [(structV name variant values) ;general case, use ppwu
      (string-append "{" (symbol->string variant) (pretty-printing values) "}")]
-    [(list anidated ...)
-     (foldr (lambda (a b) (string-append " " (pretty-printing a) b)) "" anidated)] 
-  ))
+    [(list vals ...) ;list of values
+     (foldr (lambda (a b) (string-append " " (pretty-printing a flag) b)) "" vals)]
+    [else (~a else)] ;a value that is nor a struct nor a list
+    ))
+
+#| List-to-string :: <structV 'List variant values> -> String
+-- recibe una structV cuyo nombre es List. Retorna los valores de la lista 
+-- en formato "v1 v2 v3". 
+|# 
+(define (List-to-string aList)
+  (match aList
+    [(structV 'List 'Empty _) ""]
+    [(structV 'List 'Cons values)
+     (string-append " " (~a (first values)) (List-to-string (first (rest values))))]
+    ))
+
+#|
+-- 
+--
+--
+|#
+
+#| my-list :: Void -> List
+-- retorna una lista de Racket con la sintaxis concreta de un 
+-- datatype List, con los constructores Empty y Cons, además
+-- de la definición recursiva de length (largo de una lista). 
+|#
+(define my-list
+  '{{datatype List
+     {Empty}
+     {Cons a b}}
+   {define length
+     {fun (first-element)
+          {match first-element
+            {case {Empty} => 0}
+            {case {Cons a b} => {+ 1 {length b}}}}}}})
+
+
 
