@@ -230,13 +230,17 @@
 |#
 (define (run prog [flag ""])
   (let [(res (interp (parse (list 'local my-list prog)) empty-env))]
-    (match flag
-      ["" res]
-      ["ppwu" (pretty-printing res)]
-      ["pp" (pretty-printing res "pp")]
-      )
+    (match res
+      [(? structV?)
+       (match flag
+         ["" res]
+         ["ppwu" (pretty-printing res flag)]
+         ["pp" (pretty-printing res flag)]
+         )]
+      [x x])
     )
   )
+  
 
 
 #|-----------------------------
@@ -293,9 +297,8 @@ update-env! :: Sym Val Env -> Void
 
      
 
-#| pretty-printing :: <struct> | procedure | Number | Boolean -> String
--- recibe un valor resultante de aplicar interp y lo retorna como un string
--- mas 'amigable' al lector.
+#| pretty-printing :: <structV> -> String
+-- recibe un structV y lo retorna como un string mas amigable al usuario
 |#
 (define (pretty-printing intp [flag ""])
   (match intp
