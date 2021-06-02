@@ -297,6 +297,7 @@ update-env! :: Sym Val Env -> Void
 
      
 
+  
 #| pretty-printing :: <structV> -> String
 -- recibe un structV y lo retorna como un string mas amigable al usuario
 |#
@@ -305,14 +306,48 @@ update-env! :: Sym Val Env -> Void
     [(structV 'List variant values) ;most specific case: structV name is 'List
      (if (equal? flag "pp")
          (string-append "{list" (List-to-string intp) "}") ;pp
-         (string-append "{" (symbol->string variant) (pretty-printing values) "}") ;ppwu
+         (string-append "{" (symbol->string variant) (pp-assigner values flag) "}") ;ppwu
          )]
     [(structV name variant values) ;general case, use ppwu
-     (string-append "{" (symbol->string variant) (pretty-printing values) "}")]
-    [(list vals ...) ;list of values
-     (foldr (lambda (a b) (string-append " " (pretty-printing a flag) b)) "" vals)]
-    [else (~a else)] ;a value that is nor a struct nor a list
+     (string-append "{" (symbol->string variant) (pp-assigner values flag) "}")]
     ))
+
+#|
+-- pp-assigner: structV/list/number/boolean -> string
+-- Recibe un valor desde interp y lo retorna como string.
+-- Realiza la asignación al pretty-printer correspondiente para el tipo de datos
+-- recibido. Se implementa para evitar duplicar código en cada llamado de printers.
+|#
+(define (pp-assigner intp flag)
+  (match intp
+    [(? structV? intp) (pretty-printing intp flag)]
+    [(? list? intp) (pretty-printing-list intp flag)]
+    [(? number? intp) (pretty-printing-val intp)]
+    [(? boolean? intp) (pretty-printing-val intp)])
+  )
+
+#|
+-- pretty-printing-list: list -> string
+-- función auxiliar para mantener pretty-printing recibiendo unicamente estructuras.
+-- recibe una lista y la retorna como string usando el azucar sintactica "{list a b c ...}"
+|#
+(define (pretty-printing-list intp flag)
+  (match intp
+    [(list vals ...)
+     (foldr (lambda (a b) (string-append " " (pp-assigner a flag) b)) "" vals)]
+    
+    )
+  )
+
+#|
+-- pretty-printing-val: number/boolean -> string
+-- función auxiliar para mantener pretty-printing-list recibiendo unicamente listas.
+-- recibe valores numericos o booleanos y los retorna como string.
+|#
+(define (pretty-printing-val intp)
+  (match intp
+    [(? number? n) (number->string n)]
+    [(? boolean? b) b]))
 
 #| List-to-string :: <structV 'List variant values> -> String
 -- recibe una structV cuyo nombre es List. Retorna los valores de la lista 
@@ -325,11 +360,7 @@ update-env! :: Sym Val Env -> Void
      (string-append " " (~a (first values)) (List-to-string (first (rest values))))]
     ))
 
-#|
--- 
---
---
-|#
+
 
 #| my-list :: Void -> List
 -- retorna una lista de Racket con la sintaxis concreta de un 
