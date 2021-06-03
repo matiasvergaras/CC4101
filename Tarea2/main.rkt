@@ -414,4 +414,90 @@ update-env! :: Sym Val Env -> Void
             {case {Cons a b} => {+ 1 {length b}}}}}}})
 
 
+#| stream-data :: None -> Stream
+-- Define una estructura de tipo Stream,
+-- la cual no evalua su cola a menos que sea estrictamente necesario.
+-- Stream :: {datatype stream <first> <rest>*}}
+|#
+(def stream-data '{datatype Stream {stream hd {lazy tl}}})
 
+#| make-stream :: value x value -> Stream
+-- Recibe dos valores y construye un stream basado en la estructura de
+-- stream-data, poniendo como primer valor del stream el primer valor recibido
+-- y como cola (lazy) el segundo.
+|#
+(def make-stream '{define make-stream {fun {hd {lazy tl}} {stream hd tl}}})
+
+#| ones :: None -> (Stream 1 1 1 ...)
+-- Crea un stream de 1's (una lista infinita que se evalua bajo necesidad).
+|#
+(def ones '{define ones {make-stream 1 ones}})
+
+#| stream-hd: <Stream> -> value
+-- recibe un stream y retorna su primer valor, tal cual 'head' para listas.
+|#
+(def stream-hd
+  '{define stream-hd {fun {x}
+                          {match x
+                            {case {stream hd tl} => hd}}}})
+
+#| stream-tl: <Stream> -> <Stream>
+-- recibe un stream y retorna su cola, que es otro stream.
+-- comportamiento analogo a 'rest' para listas.
+|#
+(def stream-tl
+  '{define stream-tl {fun {x}
+                          {match x
+                            {case {stream hd tl} => tl}}}})
+
+
+#| stream-take: Integer x <Stream> -> <List a b c ...>
+-- recibe un entero n y un stream. Retorna los primeros n valores del stream.
+|#
+(def stream-take
+  '{define stream-take {fun {n aStream}
+                            {if {> n 0}
+                                {Cons {stream-hd aStream} {stream-take {- n 1} {stream-tl aStream}}}
+                                {Empty}}
+                            }})
+#| stream-lib: None -> List 
+-- librería del enunciado, necesaria para inicializar lo relacionado a streams
+-- sin necesidad de volver a definir las funciones en cada programa.
+-- se entrega como definición local en los programas.
+|#
+(def stream-lib (list stream-data
+                      make-stream
+                      stream-hd
+                      stream-tl
+                      stream-take))
+
+#| stream-zipWith: <fun><Stream><Stream> -> <Stream> 
+-- combina dos streams mediante la aplicación de una función que recibe dos elementos 
+-- de forma pair-wise: el n-esimo elem. del primer stream se combina con el n-esimo del segundo stream.
+-- El resultado es otro stream.
+|#
+(def stream-zipWith
+  '{define stream-zipWith {fun {combineFun stream1 stream2}
+                               {make-stream {combineFun {stream-hd stream1} {stream-hd stream2}}
+                                            {stream-zipWith
+                                             combineFun {stream-tl stream1}
+                                             {stream-tl stream2}}}
+                               }})
+#| fibs: None --> <Stream>
+-- No recibe ningún parámetro y entrega el stream de los números de Fibonacci.
+|#
+(def fibs
+  '{define fibs {make-stream 1 {make-stream 1 {stream-zipWith {fun {prev1 prev2} {+ prev1 prev2}}
+                                                              fibs {stream-tl fibs}}}}})
+
+#| merge-sort: 
+-- Recibe dos streams, que deben venir ordenados.
+-- retorna un stream con la mezcla de ambos, ordenada. 
+|#
+(def merge-sort
+  '{define merge-sort {fun {s1 s2}
+                           {if {< {stream-hd s1} {stream-hd s2}}
+                               {make-stream {stream-hd s1} {merge-sort {stream-tl s1} s2}} 
+                               {make-stream {stream-hd s2} {merge-sort s1 {stream-tl s2}}} 
+                               }
+                           }})
