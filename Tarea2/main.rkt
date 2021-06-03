@@ -71,6 +71,13 @@
   (litP l) ; valor literal
   (constrP ctr patterns)) ; constructor y sub-patrones
 
+
+; lazy
+(deftype LazyF
+  (numV n)
+  (closureF f arg-ids)         ; funciones
+  (exprF expr env cache)) ; argumentos
+
 #| parse :: s-expr -> Expr
 -- toma sintaxis concreta y retorna una Expr (sintaxis abstracta).
 -- se modifica version entregada para agregar parseo del tipo
@@ -131,8 +138,30 @@
     [(list ctr patterns ...) (constrP (first p) (map parse-pattern patterns))]
     ))
 
+#| strict :: closureF/number/boolean/procedure/struct
+--        -> error/number/boolean/procedure/struct
+-- Recibe un valor producto de interp, y en caso de que este sea una
+-- promesa de evaluación, lo evalúa, entregando el valor correspondiente.
+; evalua los puntos de strictness. En caso de encontrar una promesa (ExprV)
+|#
+(define (strict val)
+  (match val
+    [(exprF expr env cache)
+     (if (not (equal? (unbox cache) "undefined"))
+         (unbox cache)
+         (let ([inval (strict (interp expr env))])
+           (set-box! cache inval)
+           inval))]
+    [_ val]))
+
 ;; interp :: Expr Env -> number/boolean/procedure/Struct
 (define (interp expr env)
+#| get-id :: list(symbol)/symbol ->symbol
+-- recibe un id o bien una lista '(lazy id).
+-- Retorna el id directamente, sin lista ni lazy. 
+|#
+  (define (get-id id)
+    (if (symbol? id) id (first (reverse id)))) 
   (match expr
     ; literals
     [(num n) n]
@@ -144,12 +173,22 @@
          (interp t env)
          (interp f env))]
     ; identifier
-    [(id x) (env-lookup x env)]
+    [(id x) (strict (env-lookup x env))]
     ; function (notice the meta interpretation)
+    ; ya que las cosas lazy pueden ser o argumentos o constructores de funciones,
+    ; debemos modificar el interprete de fun y de app. 
     [(fun ids body)
-     (λ (arg-vals)
-       (interp body (extend-env ids arg-vals env)))]
+     (closureF (λ (arg-vals)(interp body (extend-env (map get-id ids) arg-vals env))) ids)]
     ; application
+     [(app fun-expr arg-expr-list)
+     (match (interp fun-expr env)
+       [(closureF f arg-id-list)
+        (f (map (lambda (exp id) ;lambda desempacando de dos listas: expr e id
+                (match id
+                  [(list 'lazy x) (exprF exp env (box "undefined"))];promesa de ev. de arg
+                  [else (interp exp env)]));arg de evaluación inmediata
+             arg-expr-list arg-id-list))]
+       [(? procedure? p) (p (map (lambda (a) (interp a env)) arg-expr-list))])]
     [(app fun-expr arg-expr-list)
      ((interp fun-expr env)
       (map (λ (a) (interp a env)) arg-expr-list))]
@@ -191,8 +230,7 @@
   (def varname (variant-name var))
   ;; variant data constructor, eg. Zero, Succ
   (update-env! varname
-               (λ (args) (structV name varname args))
-               env)
+          (closureF (λ (args) (structV name varname args)) (variant-params var)) env)
   ;; variant predicate, eg. Zero?, Succ?
   (update-env! (string->symbol (string-append (symbol->string varname) "?"))
                (λ (v) (symbol=? (structV-variant (first v)) varname))
@@ -231,17 +269,16 @@
 (define (run prog [flag ""])
   (let [(res (interp (parse (list 'local my-list prog)) empty-env))]
     (match res
-      [(? structV?)
+      [(structV name variant values)
        (match flag
          ["" res]
-         ["ppwu" (pretty-printing res flag)]
-         ["pp" (pretty-printing res flag)]
+         ["ppwu" (pretty-printing (structV name variant (map strict values)) flag)]
+         ["pp" (pretty-printing (structV name variant (map strict values)) flag)]
          )]
-      [x x])
+      [_ res])
     )
   )
   
-
 
 #|-----------------------------
 Environment abstract data type
@@ -295,7 +332,6 @@ update-env! :: Sym Val Env -> Void
     (and     ,(lambda args (apply (lambda (x y) (and x y)) args)))
     (or      ,(lambda args (apply (lambda (x y) (or x y)) args)))))
 
-     
 
   
 #| pretty-printing :: <structV> -> String
@@ -316,7 +352,7 @@ update-env! :: Sym Val Env -> Void
 -- pp-assigner: structV/list/number/boolean -> string
 -- Recibe un valor desde interp y lo retorna como string.
 -- Realiza la asignación al pretty-printer correspondiente para el tipo de datos
--- recibido. Se implementa para evitar duplicar código en cada llamado de printers.
+-- recibido. Se implementa para evitar duplicar código en cada llamado
 |#
 (define (pp-assigner intp flag)
   (match intp
