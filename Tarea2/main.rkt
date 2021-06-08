@@ -16,6 +16,7 @@
          | {<expr> <expr>*}
          | {local {<def>*} <expr>}
          | {match <expr> <case>+}
+         | {lazy <id>}
 
 <case> ::= {'case <pattern> '=> <expr>}
 <pattern> ::= <num>
@@ -42,6 +43,7 @@
   (str s)
   (ifc c t f)
   (id s)
+  (lazy s)
   (app fun-expr arg-expr-list)
   (prim-app name args)   ; aplicación de primitivas
   (fun id body)
@@ -75,7 +77,7 @@
 ; lazy
 (deftype LazyF
   (numV n)
-  (closureF f arg-ids)         ; funciones
+  (closureF f arg-ids)    ; funciones
   (exprF expr env cache)) ; argumentos
 
 #| parse :: s-expr -> Expr
@@ -93,6 +95,7 @@
     [(list 'fun xs b) (fun xs (parse b))]
     [(list 'with (list (list x e) ...) b)
      (app (fun x (parse b)) (map parse e))]
+    [(list 'lazy i) (lazy i)]
     [(list 'list) ; inductive type List , case Empty 
      (parse (list 'Empty))] 
     [(list 'list vals ...) ; inductive type List, case Cons 
@@ -116,7 +119,9 @@
 ; parse-variant :: sexpr -> Variant
 (define(parse-variant v)
   (match v
-    [(list name params ...) (variant name params)]))
+    [(list name params ...) (variant name (map (lambda (id) (match id
+                                                         [(? symbol?) id]
+                                                         [(list 'lazy i) (lazy i)])) params))]))
 
 ; parse-case :: sexpr -> Case
 (define(parse-case c)
@@ -142,7 +147,6 @@
 --        -> error/number/boolean/procedure/struct
 -- Recibe un valor producto de interp, y en caso de que este sea una
 -- promesa de evaluación, lo evalúa, entregando el valor correspondiente.
-; evalua los puntos de strictness. En caso de encontrar una promesa (ExprV)
 |#
 (define (strict val)
   (match val
@@ -161,7 +165,7 @@
 -- Retorna el id directamente, sin lista ni lazy. 
 |#
   (define (get-id id)
-    (if (symbol? id) id (first (reverse id)))) 
+    (if (symbol? id) id (first (reverse id))))
   (match expr
     ; literals
     [(num n) n]
@@ -185,13 +189,10 @@
        [(closureF f arg-id-list)
         (f (map (lambda (exp id) ;lambda desempacando de dos listas: expr e id
                 (match id
-                  [(list 'lazy x) (exprF exp env (box "undefined"))];promesa de ev. de arg
-                  [else (interp exp env)]));arg de evaluación inmediata
+                  [(lazy x) (exprF exp env (box "undefined"))];promesa de ev. de arg
+                  [(? symbol? x) (interp exp env)]));arg de evaluación inmediata
              arg-expr-list arg-id-list))]
        [(? procedure? p) (p (map (lambda (a) (interp a env)) arg-expr-list))])]
-    [(app fun-expr arg-expr-list)
-     ((interp fun-expr env)
-      (map (λ (a) (interp a env)) arg-expr-list))]
     ; primitive application
     [(prim-app prim arg-expr-list)
      (apply (cadr (assq prim *primitives*))
@@ -247,6 +248,10 @@
            (find-first-matching-case value cs)))]))
 
 (define (match-pattern-with-value pattern value)
+  ;(displayln "PATTERN")
+  ;(displayln pattern)
+  ;(displayln "VALUE")
+  ;(displayln value)
   (match/values (values pattern value)
                 [((idP i) v) (list (cons i v))]
                 [((litP (bool v)) b)
@@ -258,6 +263,8 @@
                      (apply append (map match-pattern-with-value
                                         patterns str-values))
                      (list #f))]
+                [((constrP ctr patterns) (exprF e env cache))
+                 (match-pattern-with-value patterns (strict (exprF e env cache)))]
                 [(x y) (error "Match failure")]))
 
 
@@ -272,7 +279,7 @@
       [(structV name variant values)
        (match flag
          ["" res]
-         ["ppwu" (pretty-printing (structV name variant (map strict values)) flag)]
+         ["ppwu" (pretty-printing (structV name variant values) flag)]
          ["pp" (pretty-printing (structV name variant (map strict values)) flag)]
          )]
       [_ res])
@@ -321,7 +328,9 @@ update-env! :: Sym Val Env -> Void
     (%       ,(lambda args (apply modulo args)))
     (odd?    ,(lambda args (apply odd? args)))
     (even?   ,(lambda args (apply even? args)))
-    (/       ,(lambda args (apply / args)))
+    (/       ,(lambda args (if (equal? (second args) 0)
+                               (error "division by zero")
+                               (apply / args))))
     (=       ,(lambda args (apply = args)))
     (<       ,(lambda args (apply < args)))
     (<=      ,(lambda args (apply <= args)))
@@ -501,3 +510,4 @@ update-env! :: Sym Val Env -> Void
                                {make-stream {stream-hd s2} {merge-sort s1 {stream-tl s2}}} 
                                }
                            }})
+

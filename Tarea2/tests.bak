@@ -104,35 +104,3 @@
                {local {,stream-take ,merge-sort ,fibs ,stream-zipWith}
                  {stream-take 10 {merge-sort fibs fibs}}}} "pp")   "{list 1 1 1 1 2 2 3 3 5 5}"))
 
-; TESTS EXTRAIDOS DEL FORO
-
-#| Este test comporta una división por 0 en un argumento lazy.
--- Dado que el argumento es lazy y no hay flag, no debería caer
--- en un punto strict y por ende debería correr sin error. 
-|#
-;(test (error? (run '{local {{datatype T {C a {lazy b}}}
- ;               {define x {C  0 {/ 1 0}}}}
-  ;             x})) #t)
-
-(test (run '{local {{datatype T 
-                        {C {lazy a} b}}
-              {define x {C {/ 88 0} 2}}}
-        {match x
-          {case {C z q} => q}}}) 2)
-
-(test/exn (run '{local {{datatype T 
-                        {C {lazy a} b}}
-              {define x {C 2 {/ 88 0}}}}
-        {match x
-          {case {C z {C r t}} => z}
-          {case {C h q} => h}}}) "division by zero")
-
-
-( test (run '{+ 1 1} "ppwu") 2)
-
-(test/exn (run '{local {{datatype T 
-                        {C {lazy a} {lazy b}}}
-              {define x {C 2 {/ 88 0}}}}
-        {match x
-          {case {C z {C r t}} => z}
-          {case {C h q} => h}}}) "division by zero")
