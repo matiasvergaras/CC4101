@@ -104,35 +104,114 @@
                {local {,stream-take ,merge-sort ,fibs ,stream-zipWith}
                  {stream-take 10 {merge-sort fibs fibs}}}} "pp")   "{list 1 1 1 1 2 2 3 3 5 5}"))
 
-; TESTS EXTRAIDOS DEL FORO
+; TESTS PARA LAZY EVALUATION
+; Altamente basados en lo discutido en el foro. 
+(module+ lazy-tests
 
-#| Este test comporta una división por 0 en un argumento lazy.
--- Dado que el argumento es lazy y no hay flag, no debería caer
--- en un punto strict y por ende debería correr sin error. 
-|#
-;(test (error? (run '{local {{datatype T {C a {lazy b}}}
- ;               {define x {C  0 {/ 1 0}}}}
-  ;             x})) #t)
+  ; Test del enunciado: argumento lazy, retorno de argumento normal.
+  (test (run '{{fun {x  {lazy y}} x} 1 {/ 1 0}}) 1)
 
-(test (run '{local {{datatype T 
-                        {C {lazy a} b}}
-              {define x {C {/ 88 0} 2}}}
-        {match x
-          {case {C z q} => q}}}) 2)
+  ; Test del enunciado: argumentos normales, valor con division por 0.
+  (test (run '{{fun {x  y} x} 1 {/ 1 0}}) "division by zero")
 
-(test/exn (run '{local {{datatype T 
-                        {C {lazy a} b}}
-              {define x {C 2 {/ 88 0}}}}
-        {match x
-          {case {C z {C r t}} => z}
-          {case {C h q} => h}}}) "division by zero")
+  ; Test del enunciado: argumento lazy mal formado que no se usa pues
+  ; la evaluacion no requiere entrar a la variante.
+  (test (run '{local {{datatype T 
+                  {C {lazy a}}}
+                {define x {C {/ 1 0}}}}
+          {T? x}}) #t)
 
+  ; Test del enunciado: argumento lazy mal formado que se usa en un
+  ; match.
+  (test (run '{local {{datatype T 
+                  {C {lazy a}}}
+                {define x {C {/ 1 0}}}}
+          {match x
+            {case {C a} => a}}}) "division by zero")
 
-( test (run '{+ 1 1} "ppwu") 2)
+  ; Test del enunciado: argumento lazy bien formado que se usa en el
+  ; cuerpo del programa que además es entregado mediante pretty-printing
+  (test (run '{local {{datatype T {C a {lazy b}}}
+                {define x {C  0 {+ 1 2}}}}
+               x} "pp") "{C 0 3}")
+  
+  #| Este test comporta una división por 0 en un argumento lazy.
+  -- Dado que el argumento es lazy, no se usa y no hay flag, no debería caer
+  -- en un punto strict y por ende debería correr sin error, entregando
+  -- un structV.
+  |#
+  (test (structV? (run '{local {{datatype T {C a {lazy b}}}
+                                {define x {C  0 {/ 1 0}}}}
+                          x})) #t)
+  #| Este test comporta una división por 0 en un argumento lazy.
+  -- Dado que el argumento es lazy, no se usa y no hay flag, no debería caer
+  -- en un punto strict y por ende debería entregar, sin error, el resultado esperado.
+  |#
+  (test (run '{local {{datatype T 
+                                {C {lazy a} b}}
+                      {define x {C {/ 88 0} 2}}}
+                {match x
+                  {case {C z q} => q}}}) 2)
 
-(test/exn (run '{local {{datatype T 
-                        {C {lazy a} {lazy b}}}
-              {define x {C 2 {/ 88 0}}}}
-        {match x
-          {case {C z {C r t}} => z}
-          {case {C h q} => h}}}) "division by zero")
+  #| Este test comporta una división por 0 en un argumento NO lazy.
+  -- Dado que el argumento no es lazy, será evaluado (aun que no haya flag)
+  -- y el programa deberá caerse con error de division por cero.
+  |#
+  (test/exn (run '{local {{datatype T 
+                                    {C {lazy a} b}}
+                          {define x {C 2 {/ 88 0}}}}
+                    {match x
+                      {case {C z {C r t}} => z}
+                      {case {C h q} => h}}}) "division by zero")
+
+  #| Mismo test anterior, pero ahora el valor no se usa.
+  -- Aún en estas condiciones, dado que no se trata de un argumento lazy,
+  -- deberá ser evaluado y el programa deberá caerse con error de division por cero.
+  |#
+  (test/exn (run '{local {{datatype T 
+                                    {C {lazy a} b}}
+                          {define x {C 2 {/ 88 0}}}}
+                    {1}}) "division by zero")
+
+  
+  #| Este test comporta una división por 0 en un argumento NO lazy,
+  -- el cual se usa para evaluar un pattern matching.
+  -- En estas condiciones, el programa debe caerse con el error de div por 0,
+  -- pues aún cuando el argumento no se usa, es necesario evaluarlo para reconocer el patrón.
+  |#
+  (test/exn (run '{local {{datatype T 
+                                    {C {lazy a} {lazy b}}}
+                          {define x {C 2 {/ 88 0}}}}
+                    {match x
+                      {case {C z {C r t}} => z}
+                      {case {C h q} => h}}}) "division by zero")
+  )
+
+; TESTS PARA PRETTY-PRINTING 
+(module+ simple-tests
+  #| Tests simple para asegurar que el pretty-printing no interfiera con el retorno
+  -- de valores que no correspondan a structV.
+  |#
+  (test (run '{+ 1 1} "ppwu") 2)
+  (test (run '{(number? 1)}) #t)
+
+ ; Test unitario del enunciado para pretty-printing 
+ (test (pretty-printing (structV 'Nat 'Succ (list (structV 'Nat 'Zero empty))))
+        "{Succ {Zero}}")
+  
+  ; Tests del enunciado para pretty-printing de structV desde run
+  (test (run '{local {{datatype Nat 
+                  {Zero} 
+                  {Succ n}}
+                {define twice {fun {n} 
+                               {match n
+                                 {case {Zero} => {Zero}}
+                                 {case {Succ m} => {Succ {Succ {twice m}}}}}}}}
+          {twice {Succ {Succ {Zero}}}}})
+"{Succ {Succ {Succ {Succ {Zero}}}}}")
+
+  ; Tests del enunciado para pretty-printing de list
+  (test (run '{list 1 4 6} "pp") "{list 1 4 6}")
+  ; Test del enunciado para pretty-printing de list vacia
+  (test (run '{list} "pp") "{list}")
+  )
