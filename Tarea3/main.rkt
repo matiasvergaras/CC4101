@@ -48,9 +48,6 @@
   (deep-copy obj)
   )
 
-;; empty-obj    :: Object vacío
-(define empty-obj
-  object null 
 #| <member> ::=
         | (field <id> <s-expr>)
         | (method <id> (list <id> ...) <s-expr>)
@@ -63,7 +60,11 @@
 ;; values
 (deftype Val
   (numV n)
-  (boolV b))
+  (boolV b)
+  (objV fields methods objectEnv delegateEnv) ;;objetos como valores del lenguaje con
+                                              ;;campos, metodos, ambiente de definición
+                                              ;;y ambiente de delegación.
+  )
 
 (deftype Def
   (my-def id expr))
@@ -128,7 +129,7 @@ We will use a member env to represent both a field and a method list
 
 empty-memberEnv            :: MemberEnv
 lookup-memberEnv           :: Sym MemberEnv -> Val
-extend-memberEnv           :: List<Sym> List<Val> MemberEnv -> MemberEnv
+extend-memberEnv           :: Sym Val|Expr MemberEnv -> MemberEnv
 
 
 representation BNF:
@@ -140,8 +141,22 @@ representation BNF:
   (mtMemberEnv)
   (aMemberEnv id val memberEnv))
 
+#|
+empty-memberEnv:: None -> memberEnv
+representa un ambiente de miembros vacío.
+|#
 (define empty-memberEnv  (mtMemberEnv))
+
+#|
+extend-memberEnv:: id val|expr memberEnv -> memberEnv
+crea un ambiente de miembros a partir de otro agregando
+una nueva asociación id, valor. 
+|#
 (define extend-memberEnv aMemberEnv)
+
+#|
+lookup-memberEnv:: id 
+|#
 (define (lookup-memberEnv x memberEnv)
   (match memberEnv
     [(mtMemberEnv) 'undefined]
@@ -159,6 +174,7 @@ representation BNF:
 ;; parse :: s-expr -> Expr
 (define (parse s-expr)
   (match s-expr
+    ['this (this)]
     [(? number?) (num s-expr)]
     [(? symbol?) (id s-expr)]
     [(? boolean?) (bool s-expr)]
@@ -181,7 +197,6 @@ representation BNF:
     [(list 'get fld-id) (get fld-id)] 
     [(list 'set fld-id e) (set fld-id (parse e))] 
     [(list 'send obj met-id vals ...)(send (parse obj) met-id (map parse vals))]
-    ['this (this)]
     [(list 'shallow-copy obj) (shallow-copy (parse obj))]
     [(list 'deep-copy obj) (deep-copy (parse obj))]
     [(list 'fun (list vals ...) body)(object null (list (method (id 'fun) vals (parse body))))]
@@ -201,31 +216,109 @@ representation BNF:
     [(list 'define id b) (my-def id (parse b))]))
 
 
-;; interp :: Expr Env -> Val
-(define (interp expr env)
+;; interp :: Expr Env [objV|null] [objV|null] -> Val
+;; Se agregan dos parametros opcionales:
+;; uno para indicar el objeto dentro del cual se está interpretando (para el get, set y this)
+;; y otro para indicar el objeto que llama (para el this).
+(define (interp expr env [obj null] [caller null])
   (match expr
     [(num n) (numV n)]
     [(bool b) (boolV b)]
-    [(binop f l r) (make-val (f (open-val (interp l env))
-                                (open-val (interp r env))))]
-    [(unop f s) (make-val (f (open-val (interp s env))))]
+    [(binop f l r) (make-val (f (open-val (interp l env obj caller))
+                                (open-val (interp r env obj caller))))]
+    [(unop f s) (make-val (f (open-val (interp s env obj caller))))]
     [(my-if c t f)
-     (def (boolV cnd) (interp c env))
+     (def (boolV cnd) (interp c env obj caller))
      (if cnd
-         (interp t env)
-         (interp f env))]
+         (interp t env obj caller)
+         (interp f env obj caller))]
     [(id x) (env-lookup x env)]
     [(seqn expr1 expr2) (begin
-                          (interp expr1 env)
-                          (interp expr2 env))]
+                          (interp expr1 env obj caller)
+                          (interp expr2 env obj caller))]
     [(lcal defs body)
      (let ([new-env (multi-extend-env '() '() env)])
        (for-each (λ(x)
                    (def (cons id val) (interp-def x new-env))
                    (extend-frame-env! id val  new-env)
                    #t) defs)
-       (interp body new-env))
-     ]))
+       (interp body new-env obj caller))
+     ]
+    ;object
+    [(object del members)
+     (def methods_box (box empty-memberEnv))
+     (def fields_box (box empty-memberEnv))
+     (map (lambda (m) (match m
+                        [(field fld-id fld-ex)
+                         (set-box! fields_box (extend-memberEnv
+                                               fld-id (interp fld-ex env obj caller) (unbox fields_box)))]
+                        [(method met-id met-args met-exp)
+                         (set-box! methods_box (extend-memberEnv
+                                                met-id (cons met-args met-exp) (unbox methods_box)))])
+            ) members)
+     (def delEnv (if (null? del) 
+      del         
+     (multi-extend-env (list 'delegation) (list (interp del env obj caller)) env)))
+     (objV fields_box methods_box env delEnv)]
+    ;send
+    [(send o met-id vals)
+     (match (interp o env obj caller)
+       [(objV fieldsO methodsO envO delegaEnv) (def l (map (lambda (x)
+                                                     (interp x env obj caller)) vals))
+                                       (def req-met (lookup-memberEnv met-id (unbox methodsO))) ;; busco el método
+                                       (if (not (equal? req-met 'undefined))
+                                           (let [(env-met
+                                                  (multi-extend-env (car req-met) l envO))] ;; si lo encuentro, extiendo el ambiene uniendo la lista de inputs con las variables
+                                             (interp (cdr req-met) env-met (objV fieldsO methodsO envO delegaEnv) caller)) ;; interpetro el cuerpo del method que con el ambiente extendido
+                                           (if (null? delegaEnv) ;; si no encuentro el metodo, veo si puedo delegar
+                                               (error "method not found") ;; si no puedo delegar
+                                               (interp
+                                                (send (id 'delegation) met-id vals) ;; si puedo, envio un send al objeto al que le puedo delegar
+                                                delegaEnv                        ;; en el ambiente del objeto a delegar
+                                                (interp (id 'delegation) delegaEnv) ;;aqui intepreto el objeto al que le voy a delegar
+                                                (if (null? caller)               ;; veo si me delegaron a mi esta llamada
+                                                    (objV fieldsO methodsO env delegaEnv) ;; si no fue asi, es porque yo estoy delegando
+                                                    caller)))                    ;; en caso contrario, es porque me habian delegado y yo subdelego
+                                           )])]
+    ;this: ~traer el objeto actual~ traer el objeto que hizo la llamada de delegación.
+    [(this) (if (not (null? obj)) ; si estamos en un objeto, devolvemos el objeto o el caller
+                (if (null? caller) obj caller); si la llamada vino de otro objeto.
+                (error "this used outside of an object"))] ;en caso contrario, error de uso.
+    ;get: traer un campo de un objeto (dada su id). 
+    [(get fld-id) (if (not (null? obj)) ;si estamos en un objeto, buscamos en sus fields.
+                      ;lookup devuelve el campo o error de field not found.
+                      (let ([req-fld (lookup-memberEnv fld-id (unbox (objV-fields obj)))])
+                        (if (equal? 'undefined req-fld)
+                            (error "field not found")
+                            req-fld))
+                      ;si no estabamos en un objeto, levantamos el error de uso..
+                      (error "get used outside of an object"))]
+    ;set: modificar un campo (dado por id) del objeto actual por el valor resultante de interp ex
+    [(set fld-id ex) (if (not (null? obj)) ;si estamos en un objeto, 
+                         (let ([unb-fields (unbox (objV-fields obj))]);traemos sus fields
+                          (let ([req-fld (lookup-memberEnv fld-id unb-fields)])
+                            (if (equal? 'undefined req-fld)
+                                (error "field not found")
+                                (set-box! (objV-fields obj) ;buscamos y actualizamos el ambiente (o error)
+                                (extend-memberEnv fld-id (interp ex env obj caller) unb-fields)))))
+                         (error "set used outside of an object"))];si no, error de uso.
+    ;shallow copy: una copia de un objeto solo con sus campos y metodos
+    ;(sin copiar el objeto de delegación recursivamente).
+    [(shallow-copy o)
+     (def (objV copy-fields copy-methods copy-env copy-delEnv) (interp o env obj caller))
+     (objV (box (unbox copy-fields)) (box (unbox copy-methods)) copy-env copy-delEnv)]
+    ;deep copy: similar a shallow-copy, pero incluimos el objeto de
+    ;delegación en la copia de manera recursiva.`
+    [(deep-copy o)
+     (def (objV copy-fields copy-methods copy-env copy-delEnv) (interp o env obj caller))
+     (let ([denv
+            (if (null? copy-delEnv)
+             copy-delEnv
+             (multi-extend-env
+              (list 'delegation)
+              (list (interp (deep-copy (id 'delegation)) copy-delEnv)) copy-delEnv))])
+     (objV (box (unbox copy-fields)) (box (unbox copy-methods)) copy-env denv))]                                                                                              
+    ))
 
 ;; open-val :: Val -> Scheme Value
 (define (open-val v)
