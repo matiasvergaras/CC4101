@@ -61,9 +61,9 @@
 (deftype Val
   (numV n)
   (boolV b)
-  (objectV fields methods objectEnv delegateEnv) ;;objetos como valores del lenguaje con
+  (objectV fields methods objectEnv parent) ;;objetos como valores del lenguaje con
                                               ;;campos, metodos, ambiente de definición
-                                              ;;y ambiente de delegación.
+                                              ;;y padre
   )
 
 (deftype Def
